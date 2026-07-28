@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterator
 
 from .content import jsonish, normalized_key
@@ -54,12 +55,93 @@ def _number_value(value: Any) -> float | None:
     return None
 
 
+def _json_object(value: Any) -> Json | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        decoded = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def _wrapped_process_success_exemptions(payload: Json) -> set[tuple[int, str]]:
+    """Find wrapper failures contradicted by an authoritative process result.
+
+    Some shell wrappers convert any non-empty stderr into ``ok=false`` and copy
+    stderr into their error fields, even when the process exits with code zero
+    and its JSON stdout reports success. The actual process result is itself a
+    JSON-encoded string, so the normal structured walk cannot see it.
+
+    Only those wrapper fields are exempted. Any independent error or failure
+    signal elsewhere in the payload still makes the event fail.
+    """
+    if _boolean_value(payload.get("is_error")) is not False:
+        return set()
+
+    details = payload.get("details")
+    if not isinstance(details, dict):
+        return set()
+    raw = details.get("raw")
+    if not isinstance(raw, dict):
+        return set()
+    data = raw.get("data")
+    if not isinstance(data, dict):
+        return set()
+
+    output = _json_object(data.get("output"))
+    if output is None or _number_value(output.get("exitCode")) != 0:
+        return set()
+    stderr = output.get("stderr")
+    if not isinstance(stderr, str) or not stderr.strip():
+        return set()
+
+    stdout = _json_object(output.get("stdout"))
+    if stdout is None or not any(
+        _boolean_value(stdout.get(key)) is True for key in ("ok", "success")
+    ):
+        return set()
+
+    exemptions: set[tuple[int, str]] = set()
+    wrapper_false_fields = (
+        (details, "ok"),
+        (raw, "ok"),
+        (data, "success"),
+    )
+    for node, key in wrapper_false_fields:
+        if _boolean_value(node.get(key)) is False:
+            exemptions.add((id(node), normalized_key(key)))
+
+    wrapper_error_fields = (
+        (details, "error"),
+        (raw, "error"),
+        (data, "error"),
+    )
+    for node, key in wrapper_error_fields:
+        if key not in node:
+            continue
+        message = _message_from_error(node.get(key))
+        if message and message.strip() != stderr.strip():
+            return set()
+        if message:
+            exemptions.add((id(node), normalized_key(key)))
+
+    return exemptions
+
+
 def event_status(payload: Json) -> tuple[str, bool]:
     """Infer failure from common Tool and model result conventions."""
     error_messages: list[str] = []
     reasons: list[str] = []
     stderr_messages: list[str] = []
     explicit_success = False
+    explicit_zero_exit = False
+    success_exemptions = _wrapped_process_success_exemptions(payload)
     failure_states = {
         "cancelled",
         "canceled",
@@ -75,6 +157,8 @@ def event_status(payload: Json) -> tuple[str, bool]:
     for node in _walk_json(payload):
         for key, value in node.items():
             normalized = normalized_key(key)
+            if (id(node), normalized) in success_exemptions:
+                continue
             if normalized in {"success", "ok"}:
                 boolean = _boolean_value(value)
                 if boolean is False:
@@ -95,6 +179,8 @@ def event_status(payload: Json) -> tuple[str, bool]:
                 numeric = _number_value(value)
                 if numeric is not None and numeric != 0:
                     reasons.append(f"{key}={value}")
+                elif numeric == 0:
+                    explicit_zero_exit = True
             elif normalized in {"http_status", "http_status_code"}:
                 numeric = _number_value(value)
                 if numeric is not None and numeric >= 400:
@@ -125,7 +211,12 @@ def event_status(payload: Json) -> tuple[str, bool]:
                 stderr_messages.append(str(value))
 
     failed = bool(error_messages or reasons)
-    if not failed and stderr_messages and not explicit_success:
+    if (
+        not failed
+        and stderr_messages
+        and not explicit_success
+        and not explicit_zero_exit
+    ):
         failed = True
     if not failed:
         return "", False

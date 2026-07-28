@@ -7,10 +7,10 @@ from pathlib import Path
 
 from .io import (
     EmptyJsonlError,
+    convert_directory_files,
     convert_file,
     default_output_path,
     iter_jsonl_files,
-    output_path_for,
 )
 from .models import ConversionOptions
 
@@ -89,32 +89,22 @@ def main() -> int:
         print(f"files=0 converted=0 skipped=0 output_dir={output_path}")
         return 0
 
-    total_converted = 0
-    total_skipped = 0
-    skipped_files = 0
-    for source in files:
-        destination = output_path_for(source, input_path, output_path)
-        try:
-            converted, skipped = convert_file(
-                source,
-                destination,
-                project_id=args.project_id,
-                trace_id=None,
-                skip_bad_lines=args.skip_bad_lines,
-                strict_events=args.strict_events,
-                options=options,
-            )
-        except EmptyJsonlError:
-            skipped_files += 1
-            print(f"[skip] {source}: empty JSONL")
-            continue
-        total_converted += converted
-        total_skipped += skipped
-        print(f"[ok] {source} -> {destination} spans={converted} skipped={skipped}")
+    total_converted, total_skipped, skipped_files, merged_files = (
+        convert_directory_files(
+            files,
+            input_path,
+            output_path,
+            project_id=args.project_id,
+            skip_bad_lines=args.skip_bad_lines,
+            strict_events=args.strict_events,
+            options=options,
+        )
+    )
 
     print(
         f"files={len(files)} converted={total_converted} "
         f"skipped={total_skipped} skipped_files={skipped_files} "
+        f"merged_files={merged_files} "
         f"output_dir={output_path}"
     )
     return 0
