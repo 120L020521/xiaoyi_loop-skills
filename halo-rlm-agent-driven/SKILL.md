@@ -79,7 +79,9 @@ scratch files. Never delete source JSONL or prepared artifacts.
 ## 2. Build the prompt locally
 
 Before building anything, resolve the task context and resolve a Judge directory
-to exactly one JSON object. Decide the editable surfaces at the same time. Missing
+to exactly one JSON object. Decide the editable target names at the same time.
+These surface names are only the allowlist for `proposed_changes[].target`; the
+helper does not read them as files or require a surfaces directory. Missing
 context must remain `MISSING`; never synthesize it.
 
 Then run exactly once for each prepared trace from
@@ -88,7 +90,7 @@ Then run exactly once for each prepared trace from
 ```bash
 python -m halo_rlm.agent_cli build-prompt --output PROMPT_PATH \
   [--task-json TASK_JSON] [--judge-result JUDGE_JSON] \
-  [--surface EDITABLE_FILE]... [-p "ADDITIONAL REQUEST"]
+  [--surface EDITABLE_TARGET_NAME]... [-p "ADDITIONAL REQUEST"]
 ```
 
 Use the manifest's exact `prompt_path`. `prepare_trace.py` does not create a
@@ -105,9 +107,10 @@ The helper only reads JSON and writes text; it makes no model/API call.
 
 ## 3. Diagnose with the host agent
 
-Use `--surface` for editable targets or accept `runner_skill.md` and
-`workspace_bench_tools.ts`. Do not propose rubric access, runner-core edits, or
-unlisted targets.
+Use `--surface` only to override the editable target-name allowlist. Otherwise
+accept the logical defaults `runner_skill.md` and `workspace_bench_tools.ts`;
+their physical files and a shared surfaces directory are not required. Do not
+propose rubric access, runner-core edits, or unlisted targets.
 
 Plan the investigation, delegate independent trace inspection when available,
 reconcile evidence, and write the report yourself. Give each subagent a
@@ -213,12 +216,14 @@ paths, filenames, and raw `arguments`/`result`/`error` evidence unchanged.
 Rank findings and changes with P0-P4 only as relative ordering, without fixed
 severity/category meanings. Never invent findings to fill a priority.
 
-Produce exactly 3-5 actionable changes using one component each:
-`tool_definition`, `tool_impl`, `new_tool`, `tool_merge`, `tool_split`,
-`middleware_in_tool`, or `prompt`. Target only an allowed surface. Prefer
-trace-proven tool changes. Include material, actionable efficiency findings and
-quantify expected call/retry/turn/time reduction when supported; never force an
-efficiency proposal without evidence.
+For `FAILED`, produce exactly 3-5 actionable changes. For every other execution
+classification, allow 0-5 and use an empty array when no trace-supported change
+is warranted. Each change uses one component: `tool_definition`, `tool_impl`,
+`new_tool`, `tool_merge`, `tool_split`, `middleware_in_tool`, or `prompt`.
+Target only an allowed surface. Prefer trace-proven tool changes. Include
+material, actionable efficiency findings and quantify expected
+call/retry/turn/time reduction when supported; never force a proposal without
+evidence.
 
 Return no banner, Markdown fence, or preamble. Write the JSON object to the
 manifest's exact `report_path`, then validate and normalize it locally:
@@ -232,7 +237,7 @@ Fix the report and rerun validation until it exits zero. This enforces schema
 version 5, exact allowed fields at every level, required fields and types,
 classification and P0-P4 enums, section nesting, conditional output-assessment
 shape, required Chinese narrative values, allowed component/target values, and
-3-5 changes without a model/API call.
+classification-dependent change counts without a model/API call.
 
 After all reports pass verification, delete only index sidecars created by the
 current run. Resolve every deletion target first; keep all prepared traces,

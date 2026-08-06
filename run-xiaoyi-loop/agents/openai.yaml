@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run XiaoYi Loop"
+  short_description: "批量运行小艺任务，并由独立 Subagent 完成 Judge"
+  default_prompt: "使用 $run-xiaoyi-loop 运行 task117 和 task120，为每个任务分配独立 Subagent Judge，并汇总报告。"

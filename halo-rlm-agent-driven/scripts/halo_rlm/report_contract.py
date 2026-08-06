@@ -84,7 +84,9 @@ REPORT_STRUCTURE_GUIDANCE = (
     "must contain exactly expected_output_files, actual_output_files, impact, and evidence, and "
     "it must appear immediately after execution_classification and before primary_failure_mode. "
     "Omit that object when no output problem is supported. Keep the error inventory "
-    "aggregate-only, and use [] when a section has no evidence."
+    "aggregate-only, and use [] when a section has no evidence. FAILED reports require exactly "
+    "3-5 proposed_changes; every other execution classification allows 0-5 and must use [] when "
+    "no trace-supported change is warranted."
 )
 
 
@@ -344,13 +346,21 @@ def _validate_diagnosis(value: Any) -> None:
 def _validate_proposed_changes(
     value: Any,
     *,
+    execution_classification: str,
     allowed_components: Iterable[str] | None,
     allowed_targets: Iterable[str] | None,
 ) -> None:
     if not isinstance(value, list):
         raise ValueError("model diagnostic report proposed_changes must be a JSON array")
-    if not 3 <= len(value) <= 5:
-        raise ValueError("model diagnostic report must contain exactly 3-5 proposed_changes")
+    if execution_classification == "FAILED":
+        if not 3 <= len(value) <= 5:
+            raise ValueError(
+                "FAILED diagnostic reports must contain exactly 3-5 proposed_changes"
+            )
+    elif len(value) > 5:
+        raise ValueError(
+            "non-FAILED diagnostic reports must contain at most 5 proposed_changes"
+        )
     components = set(allowed_components or ())
     targets = set(allowed_targets or ())
     for index, raw_change in enumerate(value):
@@ -403,6 +413,7 @@ def normalize_json_report(
     _validate_diagnosis(value["diagnosis"])
     _validate_proposed_changes(
         value["proposed_changes"],
+        execution_classification=value["diagnosis"]["execution_classification"],
         allowed_components=allowed_components,
         allowed_targets=allowed_targets,
     )

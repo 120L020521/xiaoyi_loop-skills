@@ -995,6 +995,7 @@ def test_agent_cli() -> None:
         "agent report validator rewrites canonical UTF-8 JSON",
     )
 
+    report["diagnosis"]["execution_classification"] = "FAILED"
     report["proposed_changes"] = [
         _valid_change()
     ]
@@ -1015,8 +1016,33 @@ def test_agent_cli() -> None:
         timeout=120,
     )
     check(
-        rejected.returncode == 2 and "exactly 3-5 proposed_changes" in rejected.stdout,
-        "host-agent report validator enforces 3-5 changes",
+        rejected.returncode == 2
+        and "FAILED diagnostic reports must contain exactly 3-5 proposed_changes"
+        in rejected.stdout,
+        "host-agent report validator enforces 3-5 changes for FAILED",
+    )
+
+    report["diagnosis"]["execution_classification"] = "SUCCEEDED_CLEANLY"
+    report["proposed_changes"] = []
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f)
+    clean = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "halo_rlm.agent_cli",
+            "validate-report",
+            report_path,
+        ],
+        cwd=HERE,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    check(
+        clean.returncode == 0,
+        "host-agent report validator allows zero changes for clean success",
     )
 
 

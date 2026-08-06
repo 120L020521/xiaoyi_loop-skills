@@ -102,7 +102,9 @@ def build_halo_prompt(
         "  SUCCEEDED_CLEANLY, or UNKNOWN.",
         "- Recovery requires a later success/verification for the same operation with",
         "  compatible arguments; unrelated OK spans do not prove recovery.",
-        "- Propose exactly 3-5 surgical changes. Allowed components: "
+        "- For FAILED, propose exactly 3-5 surgical changes. For every other",
+        "  execution classification, propose 0-5 and use [] when no trace-supported",
+        "  change is warranted. Allowed components: "
         + ", ".join(BETTER_HARNESS_COMPONENTS)
         + ".",
         "- Every change needs one allowed component, P0-P4 priority, and one editable target.",
