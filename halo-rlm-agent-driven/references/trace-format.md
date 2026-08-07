@@ -47,6 +47,8 @@ Semantic health markers worth searching (no fixed schema): `success=false`,
   `<traces.jsonl>.halo-rlm-index.json`. Source size and modification time
   invalidate stale caches. Read-only directories remain supported without a
   cache.
+- Keep sidecars as reusable generated cache. Do not delete them to refresh a
+  diagnosis; stale cache contents are rejected and rebuilt automatically.
 - Full attributes are parsed **on demand** by seeking back to the raw line —
   the file is never loaded wholesale into memory.
 - `raw_jsonl_bytes` of a trace = sum of its line byte lengths; the overview's

@@ -29,6 +29,13 @@ Judge result, and output root to `halo-rlm-agent-driven`. Omit `--surface` so
 HALO uses its logical default target-name allowlist; no surface files or surface
 directory are handoff inputs.
 
+Treat the resolved logs and Judge roots as read-only. Pass the exact
+`paths.trace_jsonl` for each Task; never pass a batch root or recursively scan
+it. Write generated diagnosis artifacts only below `paths.halo_artifact_dir`.
+Reuse index sidecars and never delete them. A new validated report may overwrite
+that Task's existing `paths.halo_artifact_dir/halo_report.json` without a prior
+delete operation.
+
 ## Runtime and handoff contract
 
 Use these sibling roots by default when the workspace has no XiaoYi configuration:
@@ -135,6 +142,8 @@ Give each subagent only the HALO skill root, Task ID, `paths.trace_jsonl`,
    target-name allowlist.
 4. Diagnose and validate the schema-v5 Chinese HALO report exactly as required
    by the HALO skill, then return its manifest and report paths.
+5. Do not delete or recursively search for index sidecars. Leave cache and
+   prepared artifacts in place after validation.
 
 If trace preparation or validation fails, record that Task's HALO failure and
 continue the queue. If nested investigator capacity is unavailable, let that
@@ -143,6 +152,9 @@ worker finishes, the parent must read each manifest and report and rerun HALO's
 `validate-report`; never trust only a subagent message.
 
 ### 5. Summarize
+
+After the parent has rerun `validate-report` for every eligible Task, run by
+default:
 
 ```powershell
 & <python> "<skill_root>\scripts\handoff.py" summarize `
@@ -154,6 +166,7 @@ handoff and verifies that the manifest source/report paths match the selected
 trace, preventing reuse of old HALO reports. It writes a partial summary without
 blocking valid Tasks when another Task failed or lacked a trace.
 
-Return the combined Task/Judge/HALO statuses and report paths. Finish when every
-selected Task has a validated report, a recorded HALO failure, a missing-trace
-skip, or an explicit mode-filter skip.
+Return the Task/Judge/HALO statuses and report paths to the user. Finish when
+every selected Task has a validated report, a recorded HALO failure, a
+missing-trace skip, or an explicit mode-filter skip, and the batch summary has
+been written.

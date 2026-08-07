@@ -53,6 +53,12 @@ not infer roles from suffixes. The script:
 - reports a collision instead of letting multiple logical traces overwrite one
   task artifact directory.
 
+Treat the supplied source JSONL, its parent directory, Task/Judge inputs, and
+all unrelated files as read-only. When the caller or a handoff supplies an
+exact JSONL path, pass that file directly; never replace it with an ancestor
+directory or recursively enumerate that directory. Recursive discovery is
+allowed only when the user explicitly selected a directory as `INPUT`.
+
 One raw JSONL may therefore produce multiple trace ids in one prepared HALO
 JSONL, for example one main AGENT trace plus one trace per embedded child run.
 Treat the manifest entry as a dataset path, not as proof that it contains only
@@ -74,7 +80,11 @@ detection; `--output-root` selects artifacts, while `-o/--output` is invalid.
 
 Use the native host shell. On Windows use PowerShell paths, not WSL paths.
 Create no other files. Keep tool results in context; remove unavoidable OS-temp
-scratch files. Never delete source JSONL or prepared artifacts.
+scratch files. Never delete or modify source JSONL, Task/Judge inputs, or
+unrelated files. Do not use `--force` merely to refresh a diagnosis. Generated
+HALO files may be created, reused, or refreshed only under `OUTPUT_ROOT`; an
+existing diagnosis report at the manifest's exact `report_path` may be
+overwritten by the new diagnosis without deleting it first.
 
 ## 2. Build the prompt locally
 
@@ -226,7 +236,8 @@ call/retry/turn/time reduction when supported; never force a proposal without
 evidence.
 
 Return no banner, Markdown fence, or preamble. Write the JSON object to the
-manifest's exact `report_path`, then validate and normalize it locally:
+manifest's exact `report_path`, replacing an older report at that path when
+present, then validate and normalize it locally:
 
 ```bash
 python -m halo_rlm.agent_cli validate-report REPORT_PATH \
@@ -239,6 +250,8 @@ classification and P0-P4 enums, section nesting, conditional output-assessment
 shape, required Chinese narrative values, allowed component/target values, and
 classification-dependent change counts without a model/API call.
 
-After all reports pass verification, delete only index sidecars created by the
-current run. Resolve every deletion target first; keep all prepared traces,
-manifests, prompts, reports, and unrelated files.
+Keep index sidecars in place and reuse them. They are fingerprint-checked query
+caches under the HALO output tree; the trace tools rebuild stale caches
+automatically and may atomically refresh a stale sidecar. Never enumerate
+directories to find them, delete them before or after diagnosis, or issue
+per-sidecar cleanup commands.
