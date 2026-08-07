@@ -53,8 +53,83 @@ $env:PYTHONIOENCODING = "utf-8"
 ```
 
 批量 Task 也可以放在 `task/<ID>/`、`tasks/<ID>/` 或工作目录的 `<ID>/` 下。
-`metadata.json` 需要包含 `absolute_id`、非空 `task` 和非空 `rubrics`；数字父目录可在
-缺少 `absolute_id` 时提供 Task ID。
+
+### metadata.json 标准结构
+
+以下结构以 `Workspace-Bench/evaluation/tasks_lite/3/metadata.json` 为参考。标准 Task
+应显式填写 `absolute_id`；虽然数字父目录可以在缺少该字段时提供 Task ID，但这仅是
+Runner 的兼容行为，不建议作为交付格式。
+
+| 字段 | 类型 | 要求与用途 |
+| --- | --- | --- |
+| `absolute_id` | integer | 必填。Task 的数字 ID，必须与数字父目录一致。 |
+| `language` | string | 建议填写，如中文任务使用 `cn`。 |
+| `persona` | string | 建议填写。描述任务面向的角色。 |
+| `task` | string | 必填且非空。Runner 实际发送给小艺的任务正文。 |
+| `task_diff` | string | 可选。任务难度或步骤/协同描述。 |
+| `output_files` | string[] | 强烈建议填写。列出预期输出文件，供产物收集、Judge 和 HALO 使用。 |
+| `rubrics` | string[] | 必填、非空，且每项均为非空字符串。Judge 按数组顺序逐条评分。 |
+| `rubric_types` | string[] | 建议填写，并与 `rubrics` 等长、按索引对应。 |
+| `file_dep_graph` | object[] | 可选。每项使用 `from`、`to` 描述输入文件到输出文件的依赖。 |
+| `data_manifest` | object[] | Task 依赖输入文件时必填。每项使用 `filename` 和 `stored_relpath`。 |
+| `tested_capabilities` | string[] | 可选。描述任务覆盖的能力。 |
+| `id` | string | 建议填写为 `absolute_id` 的字符串形式。 |
+| `file_system` | string | 可选。Workspace-Bench 的任务环境分类。 |
+| `user_profit` | string | 可选。受益用户或业务角色。 |
+| `job` | string | 可选。任务对应的岗位名称。 |
+
+完整结构示例：
+
+```json
+{
+  "absolute_id": 3,
+  "language": "cn",
+  "persona": "Backend Developer",
+  "task": "读取输入文件并生成 result.md。",
+  "task_diff": "中等",
+  "output_files": [
+    "result.md"
+  ],
+  "rubrics": [
+    "是否创建 result.md？",
+    "输出内容是否满足任务要求？"
+  ],
+  "rubric_types": [
+    "基础评估",
+    "结果评估"
+  ],
+  "file_dep_graph": [
+    {
+      "from": "source.txt",
+      "to": "result.md"
+    }
+  ],
+  "data_manifest": [
+    {
+      "filename": "source.txt",
+      "stored_relpath": "data/0123456789abcdef_source.txt"
+    }
+  ],
+  "tested_capabilities": [
+    "Task-Providing File Utilization"
+  ],
+  "id": "3",
+  "file_system": "开发人员",
+  "user_profit": "开发人员",
+  "job": "Backend Developer"
+}
+```
+
+一致性要求：
+
+- `metadata.json` 顶层必须是一个 UTF-8 JSON 对象。
+- `absolute_id` 应与 Task 数字目录名及 `id` 表示同一个 Task。
+- `rubric_types[i]` 应描述 `rubrics[i]`，两个数组建议等长。
+- `file_dep_graph.from` 使用逻辑输入文件名，`to` 应对应 `output_files` 中的输出。
+- `data_manifest.filename` 是任务中引用的逻辑文件名；`stored_relpath` 是相对于 Task
+  目录的实际文件路径，必须留在 Task 目录内并且文件真实存在。
+- 声明 `data_manifest` 时，应将输入文件放在 Task 目录的 `data/` 下。Task 不依赖输入
+  文件时可以省略该字段或使用空数组。
 
 ## 快速使用案例
 
