@@ -271,8 +271,13 @@ expected_output_files ← output_files 或 expected_output_files
 JSON 报告，并反复执行以下校验直到成功：
 
 ```powershell
-python -m halo_rlm.agent_cli validate-report "<manifest.report_path>"
+python -m halo_rlm.agent_cli validate-report "<manifest.report_path>" `
+  --manifest "<manifest.manifest_path>"
 ```
+
+校验成功时必须返回 `validation=complete`。HALO 在同一入口中完成 schema-v5
+结构、manifest 路径绑定、产物新鲜度以及报告 Trace/Span 引用真实性校验；只诊断
+而不经过批量编排时也执行相同的完整校验。
 
 默认不传 `--surface`，HALO 使用内置的逻辑目标名白名单；不需要准备任何 Surface
 文件或目录。只有明确需要覆盖该白名单时才传目标名称。
@@ -306,7 +311,7 @@ Judge：一 Task 一个独立 Judge subagent
                     ↓
 HALO：一 Task 一个独立诊断 subagent
                     ↓
-父 Agent 重新验证报告并生成批次汇总
+HALO 完成诊断，父 Agent 生成批次汇总
 ```
 
 Judge 与 HALO 使用相同的外层调度模式：建立队列、一个 Task 一个 fresh subagent、
@@ -347,8 +352,9 @@ HALO Agent 25  → xiaoyi_halo/task25_halo/
 HALO Agent 117 → xiaoyi_halo/task117_halo/
 ```
 
-一个诊断失败不应中断其他 Task。全部诊断 subagent 结束后，父 Agent 必须读取每个
-manifest 和 report，并再次运行 `validate-report`，不能只相信 subagent 完成消息。
+一个诊断失败不应中断其他 Task。每个 HALO subagent 只需按 HALO Skill 完成自身
+流程并返回 manifest 和 report 路径；父 Agent 不运行或解释 `validate-report`，只记录
+HALO 成功/失败状态并调用 `summarize` 检查当前批次的新鲜度和路径绑定。
 
 ### 批次汇总
 

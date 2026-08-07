@@ -32,7 +32,7 @@ directory are handoff inputs.
 Treat the resolved logs and Judge roots as read-only. Pass the exact
 `paths.trace_jsonl` for each Task; never pass a batch root or recursively scan
 it. Write generated diagnosis artifacts only below `paths.halo_artifact_dir`.
-Reuse index sidecars and never delete them. A new validated report may overwrite
+Reuse index sidecars and never delete them. A new HALO report may overwrite
 that Task's existing `paths.halo_artifact_dir/halo_report.json` without a prior
 delete operation.
 
@@ -140,21 +140,23 @@ Give each subagent only the HALO skill root, Task ID, `paths.trace_jsonl`,
    `build_prompt_inputs`. Either optional context may be absent. Do not pass
    `--surface`; use HALO's default
    target-name allowlist.
-4. Diagnose and validate the schema-v5 Chinese HALO report exactly as required
-   by the HALO skill, then return its manifest and report paths.
+4. Apply the HALO skill through completion, then return its manifest and report
+   paths. Do not copy, invoke, or reinterpret HALO's internal report-validation
+   procedure in this coordinator.
 5. Do not delete or recursively search for index sidecars. Leave cache and
    prepared artifacts in place after validation.
 
-If trace preparation or validation fails, record that Task's HALO failure and
+If the HALO subagent fails, record that Task's HALO failure and
 continue the queue. If nested investigator capacity is unavailable, let that
-HALO worker use the HALO skill's bounded single-agent fallback. After every
-worker finishes, the parent must read each manifest and report and rerun HALO's
-`validate-report`; never trust only a subagent message.
+HALO worker use the HALO skill's bounded single-agent fallback. The parent must
+not run `validate-report`; report acceptance belongs entirely to HALO. Let
+`summarize` perform only current-batch freshness and manifest/source/report
+binding checks.
 
 ### 5. Summarize
 
-After the parent has rerun `validate-report` for every eligible Task, run by
-default:
+After every eligible Task has either completed HALO or recorded a HALO failure,
+run by default:
 
 ```powershell
 & <python> "<skill_root>\scripts\handoff.py" summarize `
@@ -167,6 +169,6 @@ trace, preventing reuse of old HALO reports. It writes a partial summary without
 blocking valid Tasks when another Task failed or lacked a trace.
 
 Return the Task/Judge/HALO statuses and report paths to the user. Finish when
-every selected Task has a validated report, a recorded HALO failure, a
+every selected Task has a completed HALO report, a recorded HALO failure, a
 missing-trace skip, or an explicit mode-filter skip, and the batch summary has
 been written.

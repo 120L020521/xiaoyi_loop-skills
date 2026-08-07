@@ -241,14 +241,26 @@ present, then validate and normalize it locally:
 
 ```bash
 python -m halo_rlm.agent_cli validate-report REPORT_PATH \
+  --manifest MANIFEST_PATH \
   [--surface EDITABLE_FILE]...
 ```
 
-Fix the report and rerun validation until it exits zero. This enforces schema
-version 5, exact allowed fields at every level, required fields and types,
-classification and P0-P4 enums, section nesting, conditional output-assessment
-shape, required Chinese narrative values, allowed component/target values, and
-classification-dependent change counts without a model/API call.
+Use the manifest's exact `manifest_path`; do not derive another one. Fix the
+report and rerun validation until it exits zero and returns
+`"validation": "complete"`. This single HALO-owned acceptance step enforces:
+
+- schema version 5, exact fields, types, nesting, enums, Chinese narratives,
+  allowed component/target values, and classification-dependent change counts;
+- one error-free prepared-trace manifest whose source, selected trace, prompt,
+  report, and manifest paths exist and bind to the current artifact directory;
+- a prepared trace that is not older than its source and a report that is not
+  older than the authoritative prompt;
+- report trace ids, evidence trace/span pairs, inventory sample span ids, and
+  chronology span ids that actually exist in the prepared trace.
+
+Omitting `--manifest` performs schema-only compatibility validation and is not
+sufficient to finish a HALO diagnosis. The complete validator makes no
+model/API call.
 
 Keep index sidecars in place and reuse them. They are fingerprint-checked query
 caches under the HALO output tree; the trace tools rebuild stale caches

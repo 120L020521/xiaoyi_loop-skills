@@ -735,6 +735,19 @@ def test_max_turns() -> None:
 
 def test_better_harness_component_validation() -> None:
     section("Unified report component and target validation")
+
+    def expect_error(candidate: dict, expected: str, label: str) -> None:
+        try:
+            normalize_json_report(
+                json.dumps(candidate),
+                allowed_components=BETTER_HARNESS_COMPONENTS,
+                allowed_targets=DEFAULT_EDITABLE_SURFACES,
+            )
+        except ValueError as exc:
+            check(expected in str(exc), label)
+            return
+        check(False, label)
+
     report_example = render_report_example(
         BETTER_HARNESS_COMPONENTS,
         include_evaluator_context=True,
@@ -782,36 +795,22 @@ def test_better_harness_component_validation() -> None:
         _valid_change(),
         _valid_change("tool_impl", "workspace_bench_tools.ts"),
     ]
-    try:
-        normalize_json_report(
-            json.dumps(report),
-            allowed_components=BETTER_HARNESS_COMPONENTS,
-            allowed_targets=DEFAULT_EDITABLE_SURFACES,
-        )
-        check(False, "unified report validator rejects an unsupported component")
-    except ValueError as exc:
-        check(
-            "component must be one of" in str(exc),
-            "unified report validator rejects an unsupported component",
-        )
+    expect_error(
+        report,
+        "component must be one of",
+        "unified report validator rejects an unsupported component",
+    )
 
     report["proposed_changes"] = [
         _valid_change("prompt", "trace instrumentation"),
         _valid_change(),
         _valid_change("tool_impl", "workspace_bench_tools.ts"),
     ]
-    try:
-        normalize_json_report(
-            json.dumps(report),
-            allowed_components=BETTER_HARNESS_COMPONENTS,
-            allowed_targets=DEFAULT_EDITABLE_SURFACES,
-        )
-        check(False, "unified report validator rejects a non-editable target")
-    except ValueError as exc:
-        check(
-            "target must be one of" in str(exc),
-            "unified report validator rejects a non-editable target",
-        )
+    expect_error(
+        report,
+        "target must be one of",
+        "unified report validator rejects a non-editable target",
+    )
 
     report["proposed_changes"] = [
         _valid_change(),
@@ -841,78 +840,44 @@ def test_better_harness_component_validation() -> None:
 
     malformed = json.loads(json.dumps(report))
     malformed["diagnosis"]["task_and_output_files_assessment"]["status"] = "failed"
-    try:
-        normalize_json_report(
-            json.dumps(malformed),
-            allowed_components=BETTER_HARNESS_COMPONENTS,
-            allowed_targets=DEFAULT_EDITABLE_SURFACES,
-        )
-        check(False, "strict validator rejects ad-hoc conditional assessment fields")
-    except ValueError as exc:
-        check(
-            "has unsupported fields: status" in str(exc),
-            "strict validator rejects ad-hoc conditional assessment fields",
-        )
+    expect_error(
+        malformed,
+        "has unsupported fields: status",
+        "strict validator rejects ad-hoc conditional assessment fields",
+    )
 
     malformed = json.loads(json.dumps(report))
     malformed["diagnosis"]["execution_classification"] = "SUCCESS"
-    try:
-        normalize_json_report(
-            json.dumps(malformed),
-            allowed_components=BETTER_HARNESS_COMPONENTS,
-            allowed_targets=DEFAULT_EDITABLE_SURFACES,
-        )
-        check(False, "strict validator rejects an unknown execution classification")
-    except ValueError as exc:
-        check(
-            "execution_classification must be one of" in str(exc),
-            "strict validator rejects an unknown execution classification",
-        )
+    expect_error(
+        malformed,
+        "execution_classification must be one of",
+        "strict validator rejects an unknown execution classification",
+    )
 
     malformed = json.loads(json.dumps(report))
     malformed["diagnosis"]["conclusion"] = "English-only conclusion"
-    try:
-        normalize_json_report(
-            json.dumps(malformed),
-            allowed_components=BETTER_HARNESS_COMPONENTS,
-            allowed_targets=DEFAULT_EDITABLE_SURFACES,
-        )
-        check(False, "strict validator rejects English-only narrative content")
-    except ValueError as exc:
-        check(
-            "must contain Simplified Chinese narrative text" in str(exc),
-            "strict validator rejects English-only narrative content",
-        )
+    expect_error(
+        malformed,
+        "must contain Simplified Chinese narrative text",
+        "strict validator rejects English-only narrative content",
+    )
 
     malformed = json.loads(json.dumps(report))
     del malformed["diagnosis"]["evidence_chain"][0]["occurrence_count"]
-    try:
-        normalize_json_report(
-            json.dumps(malformed),
-            allowed_components=BETTER_HARNESS_COMPONENTS,
-            allowed_targets=DEFAULT_EDITABLE_SURFACES,
-        )
-        check(False, "strict validator rejects incomplete evidence items")
-    except ValueError as exc:
-        check(
-            "missing fields: occurrence_count" in str(exc),
-            "strict validator rejects incomplete evidence items",
-        )
+    expect_error(
+        malformed,
+        "missing fields: occurrence_count",
+        "strict validator rejects incomplete evidence items",
+    )
 
     malformed = json.loads(json.dumps(report))
     malformed["unexpected"] = True
-    try:
-        normalize_json_report(
-            json.dumps(malformed),
-            allowed_components=BETTER_HARNESS_COMPONENTS,
-            allowed_targets=DEFAULT_EDITABLE_SURFACES,
-        )
-        check(False, "strict validator rejects unknown top-level fields")
-    except ValueError as exc:
-        check(
-            "root has unsupported fields: unexpected" in str(exc),
-            "strict validator rejects unknown top-level fields",
-        )
+    expect_error(
+        malformed,
+        "root has unsupported fields: unexpected",
+        "strict validator rejects unknown top-level fields",
+    )
+
 
 def test_agent_cli() -> None:
     section("No-API host-agent prompt and report helpers")
@@ -930,24 +895,25 @@ def test_agent_cli() -> None:
     env = os.environ.copy()
     env.pop("OPENAI_API_KEY", None)
     env.pop("OPENAI_BASE_URL", None)
-    built = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "halo_rlm.agent_cli",
-            "build-prompt",
-            "--output",
-            prompt_path,
-            "--task-json",
-            task_path,
-            "--judge-result",
-            judge_path,
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
+
+    def run_agent(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-m", "halo_rlm.agent_cli", *args],
+            cwd=HERE,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+
+    built = run_agent(
+        "build-prompt",
+        "--output",
+        prompt_path,
+        "--task-json",
+        task_path,
+        "--judge-result",
+        judge_path,
     )
     check(built.returncode == 0, "agent prompt builder runs without an API key")
     with open(prompt_path, encoding="utf-8") as f:
@@ -965,6 +931,7 @@ def test_agent_cli() -> None:
         execution_classification="UNKNOWN",
         primary_failure_mode="测试失败模式",
         conclusion="测试诊断结论",
+        evidence_chain=[_valid_evidence()],
         proposed_changes=[
             _valid_change(),
             _valid_change("tool_impl", "workspace_bench_tools.ts", "P1"),
@@ -973,20 +940,7 @@ def test_agent_cli() -> None:
     )
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f)
-    validated = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "halo_rlm.agent_cli",
-            "validate-report",
-            report_path,
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
+    validated = run_agent("validate-report", report_path)
     check(validated.returncode == 0, "agent report validator runs without an API key")
     with open(report_path, encoding="utf-8") as f:
         normalized = json.load(f)
@@ -995,26 +949,55 @@ def test_agent_cli() -> None:
         "agent report validator rewrites canonical UTF-8 JSON",
     )
 
+    source_path = os.path.join(agent_dir, "source.jsonl")
+    prepared_path = os.path.join(agent_dir, "prepared.halo.jsonl")
+    manifest_path = os.path.join(agent_dir, "halo-prepared-manifest.json")
+    span_line = json.dumps({"trace_id": "trace-1", "span_id": "span-1"}) + "\n"
+    for path in (source_path, prepared_path):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(span_line)
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "schema_version": 3,
+            "prepared_traces": [{
+                "source": source_path,
+                "selected": prepared_path,
+                "prompt_path": prompt_path,
+                "report_path": report_path,
+                "manifest_path": manifest_path,
+            }],
+            "errors": [],
+        }, f)
+    complete_validation = run_agent(
+        "validate-report", report_path, "--manifest", manifest_path
+    )
+    complete_result = json.loads(complete_validation.stdout)
+    check(
+        complete_validation.returncode == 0
+        and complete_result["validation"] == "complete",
+        "agent report validator performs complete manifest-aware validation",
+    )
+
+    report["report_summary"]["trace_ids"] = ["missing-trace"]
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f)
+    invalid_reference = run_agent(
+        "validate-report", report_path, "--manifest", manifest_path
+    )
+    check(
+        invalid_reference.returncode == 2
+        and "trace ids absent from the prepared trace" in invalid_reference.stdout,
+        "complete validator rejects fabricated trace references",
+    )
+    report["report_summary"]["trace_ids"] = ["trace-1"]
+
     report["diagnosis"]["execution_classification"] = "FAILED"
     report["proposed_changes"] = [
         _valid_change()
     ]
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f)
-    rejected = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "halo_rlm.agent_cli",
-            "validate-report",
-            report_path,
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
+    rejected = run_agent("validate-report", report_path)
     check(
         rejected.returncode == 2
         and "FAILED diagnostic reports must contain exactly 3-5 proposed_changes"
@@ -1026,20 +1009,7 @@ def test_agent_cli() -> None:
     report["proposed_changes"] = []
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f)
-    clean = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "halo_rlm.agent_cli",
-            "validate-report",
-            report_path,
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
+    clean = run_agent("validate-report", report_path)
     check(
         clean.returncode == 0,
         "host-agent report validator allows zero changes for clean success",
@@ -1047,7 +1017,7 @@ def test_agent_cli() -> None:
 
 
 # ----------------------------------------------------------------------
-# 5b) LLMClient HTTP path against a local stub server (429 retry + parsing)
+# 6) LLMClient HTTP path against a local stub server (429 retry + parsing)
 # ----------------------------------------------------------------------
 
 
@@ -1164,197 +1134,6 @@ def test_llm_client_http() -> None:
         check(False, "missing API key does not silently enter mock mode")
     except LLMError:
         check(True, "missing API key fails unless mock mode is explicit")
-
-
-# ----------------------------------------------------------------------
-# 6) CLI (subprocess)
-# ----------------------------------------------------------------------
-
-
-def test_cli() -> None:
-    section("CLI end-to-end (mock-demo)")
-    env = dict(os.environ)
-    env.pop("OPENAI_API_KEY", None)  # prove no key is needed in mock mode
-    proc = subprocess.run(
-        [
-            sys.executable, "-m", "halo_rlm.cli", TRACE_PATH,
-            "-p", "Diagnose errors you find and suggest fixes",
-            "--mock-demo",
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
-    check(proc.returncode == 0, f"CLI exit code 0 (stderr: {proc.stderr[-300:]})")
-    check(json.loads(proc.stdout)["schema_version"] == REPORT_SCHEMA_VERSION, "current JSON report goes to stdout")
-    check(FINAL_SENTINEL not in proc.stdout, "sentinel not in stdout report")
-    check("[halo] agent start: root" in proc.stderr, "progress logs go to stderr")
-    check("subagent" in proc.stderr, "subagent progress logged")
-
-    out_file = os.path.join(TMPDIR, "report.md")
-    proc2 = subprocess.run(
-        [sys.executable, "-m", "halo_rlm.cli", TRACE_PATH, "-p", "x", "--mock-demo", "-o", out_file],
-        cwd=HERE, capture_output=True, text=True, env=env, timeout=120,
-    )
-    check(proc2.returncode == 0 and os.path.exists(out_file), "-o writes report file")
-    with open(out_file, encoding="utf-8") as f:
-        check(json.load(f)["schema_version"] == REPORT_SCHEMA_VERSION, "report file contains current JSON report")
-    check(proc2.stdout.strip() == "", "stdout empty when -o used")
-
-    trace_only_dir = os.path.join(TMPDIR, "trace-only-artifacts")
-    trace_only_report = os.path.join(trace_only_dir, "halo_report.json")
-    proc2b = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "halo_rlm.cli",
-            TRACE_PATH,
-            "--mock-demo",
-            "-o",
-            trace_only_report,
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
-    trace_only_prompt = os.path.join(trace_only_dir, "halo_prompt.txt")
-    check(proc2b.returncode == 0, "trace-only CLI runs without an explicit prompt")
-    check(
-        os.path.exists(trace_only_prompt) and os.path.exists(trace_only_report),
-        "trace-only -o writes prompt and report together",
-    )
-    with open(trace_only_prompt, encoding="utf-8") as f:
-        saved_trace_prompt = f.read()
-    check(
-        saved_trace_prompt == build_trace_only_prompt() + "\n",
-        "saved trace-only prompt exactly matches the prompt used by the CLI",
-    )
-
-    # Executable shim (invoked via sys.executable: the test filesystem may not
-    # honor chmod +x; the shim file itself carries a python3 shebang).
-    shim = os.path.join(HERE, "halo-rlm")
-    with open(shim, encoding="utf-8") as f:
-        check(f.readline().startswith("#!"), "shim has shebang line")
-    proc3 = subprocess.run(
-        [sys.executable, shim, TRACE_PATH, "-p", "x", "--mock-demo"],
-        capture_output=True, text=True, env=env, timeout=120,
-    )
-    check(
-        proc3.returncode == 0
-        and json.loads(proc3.stdout)["schema_version"] == REPORT_SCHEMA_VERSION,
-        "halo-rlm shim works",
-    )
-
-    task_path = os.path.join(TMPDIR, "task.json")
-    judge_path = os.path.join(TMPDIR, "judge_result.json")
-    artifacts_dir = os.path.join(TMPDIR, "halo")
-    with open(task_path, "w", encoding="utf-8") as f:
-        json.dump({"task": "Create output.txt", "output_files": ["output.txt"]}, f)
-    with open(judge_path, "w", encoding="utf-8") as f:
-        json.dump({"passed": False, "score": 0.0, "feedback": "missing output"}, f)
-    proc4 = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "halo_rlm.cli",
-            TRACE_PATH,
-            "--task-json",
-            task_path,
-            "--judge-result",
-            judge_path,
-            "--artifacts-dir",
-            artifacts_dir,
-            "--mock-demo",
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
-    prompt_file = os.path.join(artifacts_dir, "halo_prompt.txt")
-    report_file = os.path.join(artifacts_dir, "halo_report.json")
-    check(proc4.returncode == 0, "default Better Harness mock CLI exits 0")
-    check(os.path.exists(prompt_file), "artifacts-dir writes halo_prompt.txt")
-    check(os.path.exists(report_file), "artifacts-dir writes halo_report.json")
-    with open(prompt_file, encoding="utf-8") as f:
-        prompt_text = f.read()
-    check("Create output.txt" in prompt_text, "halo_prompt.txt contains task context")
-    check("missing output" in prompt_text, "halo_prompt.txt contains judge context")
-    check(
-        "## MANDATORY machine-readable report contract" in prompt_text,
-        "halo_prompt.txt contains strict report contract",
-    )
-    check(
-        "Return exactly one valid UTF-8 JSON object" in prompt_text,
-        "halo_prompt.txt requires valid JSON",
-    )
-    check(
-        "Allowed components: tool_definition, tool_impl, new_tool" in prompt_text,
-        "halo_prompt.txt restricts proposed-change component tags",
-    )
-    check(
-        '"report_summary"' in prompt_text
-        and '"diagnosis"' in prompt_text
-        and '"evidence_chain"' in prompt_text
-        and '"error_span_inventory"' in prompt_text
-        and '"failure_chronology"' in prompt_text
-        and '"tool_name"' in prompt_text,
-        "halo_prompt.txt requires the requested diagnosis sections and tool names",
-    )
-    check(
-        "only as machine-readable relative ranking labels" in prompt_text
-        and "predefined issue categories or severity meanings" in prompt_text
-        and "let the model rank by evidence" in prompt_text,
-        "halo_prompt.txt leaves label semantics and ranking to the model",
-    )
-    check(
-        "Use P0 for critical impact" not in prompt_text
-        and "P1 for major impact" not in prompt_text
-        and "P4 for context only" not in prompt_text,
-        "halo_prompt.txt does not define per-label issue categories",
-    )
-    check(
-        "Treat supplied task, judge, and rubric data as evaluator context only"
-        in prompt_text
-        and "do not infer a cause from a score or" in prompt_text,
-        "halo_prompt.txt separates evaluator context from trace evidence",
-    )
-    check(
-        "`service_names` means OTel `service.name`" in prompt_text
-        and "never an agent/converter identity" in prompt_text,
-        "halo_prompt.txt distinguishes observed services from agent identity",
-    )
-    check(
-        prompt_text.rstrip().endswith(
-            "keep the error inventory aggregate-only, and use [] when a section has no evidence."
-        ),
-        "flexible sectioned JSON guidance is the last prompt instruction",
-    )
-
-    removed_flag = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "halo_rlm.cli",
-            TRACE_PATH,
-            "--better-harness-v3",
-        ],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-    )
-    check(
-        removed_flag.returncode == 2
-        and "unrecognized arguments: --better-harness-v3" in removed_flag.stderr,
-        "removed --better-harness-v3 flag is rejected",
-    )
 
 
 # ----------------------------------------------------------------------

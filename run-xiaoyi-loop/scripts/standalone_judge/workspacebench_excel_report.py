@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a Workspace-Bench judge summary workbook using pure Python."""
+"""Generate a Workspace-Bench Judge and HALO summary workbook."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ REPORT_JUDGE_FIELDS = (
     "passed",
     "failed",
 )
+REPORT_HALO_FIELDS = ("diagnosis", "proposed_changes")
+REPORT_LINK_FIELDS = ("日志链接", "Judge 结果链接", "诊断结果链接")
 ID_KEYS = ("absolute_id", "absoluteId", "task_id", "taskId", "case_id", "caseId", "id")
 COMMON_JUDGE_CONTAINERS = ("result", "judge", "evaluation", "metrics", "summary")
 EXCEL_CELL_TEXT_LIMIT = 32767
@@ -411,6 +413,61 @@ def discover_task_ids_from_judges(
     return [task_id for task_id in available_task_ids if task_id in discovered]
 
 
+def list_halo_report_files(halo_root: Optional[Path]) -> List[Path]:
+    """List HALO reports without requiring the optional HALO root to exist."""
+    if halo_root is None or not halo_root.is_dir():
+        return []
+    return sorted(
+        halo_root.glob("*/halo_report.json"),
+        key=lambda item: natural_key(str(item.relative_to(halo_root))),
+    )
+
+
+def select_halo_report(
+    report_files: Sequence[Path],
+    halo_root: Optional[Path],
+    task_id: str,
+) -> Optional[Path]:
+    """Select the current ``task<ID>_halo/halo_report.json`` for one task."""
+    if halo_root is None:
+        return None
+
+    normalized = normalize_id(task_id)
+    canonical = halo_root / f"task{normalized}_halo" / "halo_report.json"
+    if canonical.is_file():
+        return canonical
+
+    candidates = [
+        path
+        for path in report_files
+        if path_signals_task(path.relative_to(halo_root), task_id)
+    ]
+    if len(candidates) > 1:
+        paths = "\n".join(f"  - {path}" for path in candidates)
+        raise ReportError(
+            f"Task {task_id} matches multiple HALO reports:\n{paths}\n"
+            "Keep one task-specific task<ID>_halo/halo_report.json."
+        )
+    return candidates[0] if candidates else None
+
+
+def discover_task_ids_from_halo(
+    report_files: Sequence[Path],
+    halo_root: Optional[Path],
+    available_task_ids: Sequence[str],
+) -> List[str]:
+    if halo_root is None:
+        return []
+    return [
+        task_id
+        for task_id in available_task_ids
+        if any(
+            path_signals_task(path.relative_to(halo_root), task_id)
+            for path in report_files
+        )
+    ]
+
+
 def excel_text_length(value: str) -> int:
     return len(value.encode("utf-16-le")) // 2
 
@@ -438,6 +495,16 @@ def to_cell_value(value: Any) -> Any:
     except (TypeError, ValueError) as error:
         raise ReportError(f"Cannot serialize a metadata field as JSON: {error}") from error
     return checked_text(text, "A JSON field")
+
+
+def to_pretty_json_cell(value: Any, label: str) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        text = json.dumps(value, ensure_ascii=False, indent=2)
+    except (TypeError, ValueError) as error:
+        raise ReportError(f"Cannot serialize {label} as JSON: {error}") from error
+    return checked_text(text, label)
 
 
 def preferred_metadata_columns(metadata_list: Sequence[Mapping[str, Any]]) -> List[str]:
@@ -499,6 +566,8 @@ def create_workbook(
 ) -> int:
     try:
         from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
         from openpyxl.utils.exceptions import IllegalCharacterError
     except ModuleNotFoundError as error:
         raise ReportError(
@@ -509,7 +578,8 @@ def create_workbook(
     headers = [
         *metadata_columns,
         *REPORT_JUDGE_FIELDS,
-        "日志链接",
+        *REPORT_HALO_FIELDS,
+        *REPORT_LINK_FIELDS,
     ]
     workbook = Workbook()
     worksheet = workbook.active
@@ -528,6 +598,10 @@ def create_workbook(
                 to_cell_value(row.get("total")),
                 to_cell_value(row.get("passed")),
                 to_cell_value(row.get("failed")),
+                to_pretty_json_cell(row.get("diagnosis"), "HALO diagnosis"),
+                to_pretty_json_cell(row.get("proposed_changes"), "HALO proposed_changes"),
+                None,
+                None,
                 None,
             ]
         )
@@ -536,6 +610,42 @@ def create_workbook(
         for row_index, values in enumerate(matrix, start=1):
             for column_index, value in enumerate(values, start=1):
                 set_literal_cell(worksheet, row_index, column_index, value)
+
+        header_fill = PatternFill("solid", fgColor="1F4E78")
+        header_font = Font(color="FFFFFF", bold=True)
+        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        body_alignment = Alignment(vertical="top", wrap_text=True)
+        for cell in worksheet[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+        worksheet.row_dimensions[1].height = 30
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+
+        for row_index, _row in enumerate(rows, start=2):
+            for cell in worksheet[row_index]:
+                cell.alignment = body_alignment
+            worksheet.row_dimensions[row_index].height = 120
+
+        wide_columns = {
+            "task": 60,
+            "task_cn": 60,
+            "rubrics": 50,
+            "judgeRubrics": 60,
+            "diagnosis": 70,
+            "proposed_changes": 70,
+        }
+        link_columns = set(REPORT_LINK_FIELDS)
+        for column_index, header in enumerate(headers, start=1):
+            if header in wide_columns:
+                width = wide_columns[header]
+            elif header in link_columns:
+                width = 22
+            else:
+                width = min(max(len(str(header)) + 2, 12), 28)
+            worksheet.column_dimensions[get_column_letter(column_index)].width = width
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output_path)
     except IllegalCharacterError as error:
@@ -570,6 +680,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Root containing judge result JSON files",
     )
     parser.add_argument(
+        "--halo-root",
+        help=(
+            "Root containing task<ID>_halo/halo_report.json "
+            "(default: sibling xiaoyi_halo beside --judge-root)"
+        ),
+    )
+    parser.add_argument(
         "--judge-model",
         "--judge_model",
         dest="judge_model",
@@ -602,6 +719,11 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
         else str(tasks_root.parent / "task_clean_cn")
     )
     judge_root = resolve_path(args.judge_root)
+    halo_root = resolve_path(
+        args.halo_root
+        if args.halo_root
+        else str(judge_root.parent / "xiaoyi_halo")
+    )
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = resolve_path(args.out or f"workspacebench_results_{stamp}.xlsx")
     if output_path.suffix.casefold() != ".xlsx":
@@ -610,10 +732,20 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
     assert_directory(tasks_root, "Task root")
     assert_directory(tasks_cn_root, "Chinese task root")
     assert_directory(judge_root, "Judge root")
+    if args.halo_root:
+        assert_directory(halo_root, "HALO root")
+    elif not halo_root.is_dir():
+        print(
+            f"[WARN] Default HALO root does not exist: {halo_root}; "
+            "diagnosis fields and links will be blank.",
+            file=sys.stderr,
+        )
 
     print(f"[INFO] Scanning judge JSON files under: {judge_root}")
     judge_index = build_judge_index(judge_root)
     print(f"[INFO] Indexed {len(judge_index)} JSON file(s).")
+    halo_report_files = list_halo_report_files(halo_root)
+    print(f"[INFO] Indexed {len(halo_report_files)} HALO report(s) under: {halo_root}")
 
     selected_judges: Dict[str, JudgeCandidate] = {}
     if not task_ids:
@@ -623,18 +755,31 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
             f"[INFO] Found {len(available_task_ids)} task {noun} "
             "with metadata.json."
         )
-        task_ids = discover_task_ids_from_judges(judge_index, available_task_ids)
+        judged_task_ids = set(
+            discover_task_ids_from_judges(judge_index, available_task_ids)
+        )
+        diagnosed_task_ids = set(
+            discover_task_ids_from_halo(
+                halo_report_files,
+                halo_root,
+                available_task_ids,
+            )
+        )
+        task_ids = [
+            task_id
+            for task_id in available_task_ids
+            if task_id in judged_task_ids or task_id in diagnosed_task_ids
+        ]
         if not task_ids:
-            raise ReportError("No task IDs with matching judge results were discovered.")
+            raise ReportError(
+                "No task IDs with matching Judge or HALO results were discovered."
+            )
         for task_id in task_ids:
             judge = select_judge_result(judge_index, task_id)
-            if judge is None:
-                raise ReportError(
-                    f"Task {task_id} was discovered but no judge result could be selected."
-                )
-            selected_judges[task_id] = judge
+            if judge is not None:
+                selected_judges[task_id] = judge
         print(
-            f"[INFO] Auto-discovered {len(task_ids)} judged task ID(s): "
+            f"[INFO] Auto-discovered {len(task_ids)} result task ID(s): "
             f"{', '.join(task_ids)}"
         )
     else:
@@ -666,6 +811,29 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
         )
         metadata_list.append(metadata)
 
+        halo_report_path = select_halo_report(
+            halo_report_files,
+            halo_root,
+            task_id,
+        )
+        diagnosis = None
+        proposed_changes = None
+        if halo_report_path is not None:
+            halo_report = read_json(halo_report_path)
+            if not isinstance(halo_report, dict):
+                raise ReportError(
+                    f"halo_report.json must contain a JSON object: {halo_report_path}"
+                )
+            diagnosis = halo_report.get("diagnosis")
+            proposed_changes = halo_report.get("proposed_changes")
+            print(f"[INFO] Task {task_id} HALO: {halo_report_path}")
+        else:
+            print(
+                f"[WARN] Task {task_id}: no HALO report matched; "
+                "diagnosis fields and link will be blank.",
+                file=sys.stderr,
+            )
+
         judge = selected_judges.get(task_id)
         if judge is None:
             judge = select_judge_result(judge_index, task_id)
@@ -686,6 +854,8 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
                     "total": None,
                     "passed": None,
                     "failed": None,
+                    "diagnosis": diagnosis,
+                    "proposed_changes": proposed_changes,
                 }
             )
             continue
@@ -710,12 +880,16 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
                 "total": total,
                 "passed": passed,
                 "failed": failed,
+                "diagnosis": diagnosis,
+                "proposed_changes": proposed_changes,
             }
         )
 
     metadata_columns = preferred_metadata_columns(metadata_list)
     conflicting = [
-        field for field in REPORT_JUDGE_FIELDS if field in metadata_columns
+        field
+        for field in (*REPORT_JUDGE_FIELDS, *REPORT_HALO_FIELDS, *REPORT_LINK_FIELDS)
+        if field in metadata_columns
     ]
     if conflicting:
         raise ReportError(
