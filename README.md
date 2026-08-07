@@ -31,14 +31,39 @@ $env:PYTHONIOENCODING = "utf-8"
 - Runner 需要可用的 HDC 和唯一、明确的小艺设备目标。
 - Agent Judge 和 HALO 都不需要外部 Judge/LLM API Key。
 
+| 项目 | 要求 |
+| --- | --- |
+| 系统 | Runner 主要面向 Windows + PowerShell |
+| Python | 3.10 或更高版本 |
+| HDC | 能连接运行小艺的鸿蒙 PC |
+| Task 数据 | 包含 `metadata.json` 和可选 `data/` 的 Workspace-Bench Task 目录 |
+| Codex | 支持 Skill 和 Subagent |
+
+
+## 数据准备
+
+
+当前工作目录只有一个 Task 时：
+
+```text
+<agent_workspace>/
+└── task/
+    ├── metadata.json
+    └── data/
+```
+
+批量 Task 也可以放在 `task/<ID>/`、`tasks/<ID>/` 或工作目录的 `<ID>/` 下。
+`metadata.json` 需要包含 `absolute_id`、非空 `task` 和非空 `rubrics`；数字父目录可在
+缺少 `absolute_id` 时提供 Task ID。
+
 ## 快速使用案例
 
-| 场景 | 可直接发送给 Agent 的请求 |
+| 场景 | 可直接发送给 Agent 类似的请求 |
 | --- | --- |
-| 只运行并评分 | `使用 run-xiaoyi-loop，在当前 workspace 执行 Task 14、25、117，并完成 Agent Judge。` |
-| 已有 Trace，只诊断 | `使用 halo-rlm-agent-driven 诊断 D:\workspace\xiaoyi_logs\task14\task14.jsonl，生成中文报告。` |
-| 一键完整流程 | `使用 run-xiaoyi-halo-loop 执行、Judge 并诊断 Task 14、25、117，最后生成批次汇总。` |
-| 只诊断错误项 | `使用 run-xiaoyi-halo-loop 执行并 Judge Task 14、25、117，只诊断失败或异常 Task。` |
+| 只运行并评分 | `在当前 workspace 让小艺执行 Task 14、25、117，并完成 Agent Judge。` |
+| 已有 Trace，只诊断 | `诊断 D:\workspace\xiaoyi_logs\task14\task14.jsonl，生成中文报告。` |
+| 一键完整流程 | `在当前 workspace 让小艺执行 Task 14、25、117、Judge并诊断，最后生成批次汇总。` |
+| 只诊断错误项 | `执行并 Judge Task 14、25、117，只诊断失败或异常 Task。` |
 | 从 handoff 继续 | `从 D:\workspace\xiaoyi_halo\handoff.json 继续 HALO 诊断和汇总，不要重新运行 Runner 或 Judge。` |
 
 默认完整流程会诊断所有具有可用 Trace 的 Task，包括 Judge 分数为 `1` 的 Task。
