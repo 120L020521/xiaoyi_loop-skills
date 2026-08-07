@@ -56,9 +56,8 @@ $env:PYTHONIOENCODING = "utf-8"
 
 ### metadata.json 标准结构
 
-以下结构以 `Workspace-Bench/evaluation/tasks_lite/3/metadata.json` 为参考。标准 Task
-应显式填写 `absolute_id`；虽然数字父目录可以在缺少该字段时提供 Task ID，但这仅是
-Runner 的兼容行为，不建议作为交付格式。
+标准 Task应显式填写 `absolute_id`；虽然数字父目录可以在缺少该字段时提供 Task ID，但这
+仅是Runner 的兼容行为，不建议作为交付格式。
 
 | 字段 | 类型 | 要求与用途 |
 | --- | --- | --- |
@@ -124,7 +123,7 @@ Runner 的兼容行为，不建议作为交付格式。
 
 - `metadata.json` 顶层必须是一个 UTF-8 JSON 对象。
 - `absolute_id` 应与 Task 数字目录名及 `id` 表示同一个 Task。
-- `rubric_types[i]` 应描述 `rubrics[i]`，两个数组建议等长。
+- `rubric_types[i]` 应描述 `rubrics[i]`，两个数组建议等长，一一对应。
 - `file_dep_graph.from` 使用逻辑输入文件名，`to` 应对应 `output_files` 中的输出。
 - `data_manifest.filename` 是任务中引用的逻辑文件名；`stored_relpath` 是相对于 Task
   目录的实际文件路径，必须留在 Task 目录内并且文件真实存在。
