@@ -36,7 +36,7 @@ $env:PYTHONIOENCODING = "utf-8"
 | 系统 | Runner 主要面向 Windows + PowerShell |
 | Python | 3.10 或更高版本 |
 | HDC | 能连接运行小艺的鸿蒙 PC |
-| Task 数据 | 包含 `metadata.json` 和可选 `data/` 的 Workspace-Bench Task 目录 |
+| Task 数据 | 包含 `metadata.json` 和可选 `data/` 的 Workspace-Bench 或自定义 Task 目录 |
 | Codex | 支持 Skill 和 Subagent |
 
 
@@ -52,7 +52,32 @@ $env:PYTHONIOENCODING = "utf-8"
     └── data/
 ```
 
-批量 Task 也可以放在 `task/<ID>/`、`tasks/<ID>/` 或工作目录的 `<ID>/` 下。
+批量 Task 可以放在工作目录下任意名称包含 `task`（不区分大小写）的一级数据集目录中，
+例如 `task/<ID>/`、`tasks/<ID>/`、`task1/<ID>/`、`filestask/<ID>/` 或
+`MyTasks2026/<ID>/`。也继续兼容工作目录直属的 `<ID>/metadata.json`。
+
+同一工作目录可以包含多个 Task 数据集。执行时可以显式指定数据集根目录：
+
+```powershell
+python run-xiaoyi-loop/scripts/run_tasks.py 112 `
+  --workspace "<agent_workspace>" `
+  --task-dir "<agent_workspace>\filestask"
+```
+
+也可以直接传单个 Task 目录或 `metadata.json`。如果不同数据集复用了同一个 ID，未指定
+数据集时 Runner 会报告路径歧义，不会猜测。
+
+跨数据集批量执行时，应直接传入全部精确 Task 目录，并且只启动一次 Runner：
+
+```powershell
+python run-xiaoyi-loop/scripts/run_tasks.py `
+  "D:\SKILL\0810\task\112" `
+  "D:\SKILL\0810\filetask\39" `
+  --workspace "<agent_workspace>"
+```
+
+用户已经给出“目录下的 ID”时，这些 ID 就是选择条件，不应先省略 ID 试跑，再重新提交
+整个批次。
 
 ### metadata.json 标准结构
 
@@ -61,7 +86,7 @@ $env:PYTHONIOENCODING = "utf-8"
 
 | 字段 | 类型 | 要求与用途 |
 | --- | --- | --- |
-| `absolute_id` | integer | 必填。Task 的数字 ID，必须与数字父目录一致。 |
+| `absolute_id` | integer | 必填。非负整数 Task ID，无固定上限；必须与数字父目录一致。 |
 | `language` | string | 建议填写，如中文任务使用 `cn`。 |
 | `persona` | string | 建议填写。描述任务面向的角色。 |
 | `task` | string | 必填且非空。Runner 实际发送给小艺的任务正文。 |
@@ -184,7 +209,8 @@ xiaoyi_halo/
 
 ## 1. 使用 run-xiaoyi-loop
 
-支持单个 ID、多个 ID、`1-10`、`1..10` 和逗号组合。Task 目录应包含
+支持任意非负整数 ID、多个 ID、`1-10`、`1..10` 和逗号组合，不再限制为
+Workspace-Bench 的固定 ID 范围。Task 目录应包含
 `metadata.json`；其 `absolute_id`、`task` 和 `rubrics` 必须有效。
 
 ### Runner 阶段
@@ -194,6 +220,14 @@ xiaoyi_halo/
 ```powershell
 python run-xiaoyi-loop/scripts/run_tasks.py 14 25 117 `
   --workspace "<agent_workspace>"
+```
+
+指定某个业务数据集时：
+
+```powershell
+python run-xiaoyi-loop/scripts/run_tasks.py 112 `
+  --workspace "<agent_workspace>" `
+  --task-dir "<agent_workspace>\filestask"
 ```
 
 该命令只启动 Runner 阶段。Runner 通常顺序执行 Task，所有任务证据统一写到

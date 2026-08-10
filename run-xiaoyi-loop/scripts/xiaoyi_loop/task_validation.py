@@ -1,4 +1,4 @@
-"""Preflight Workspace-Bench metadata before Runner or Judge preparation."""
+"""Preflight XiaoYi Task metadata before Runner or Judge preparation."""
 
 from __future__ import annotations
 

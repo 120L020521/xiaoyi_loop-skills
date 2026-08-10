@@ -11,7 +11,7 @@
 
 示例：
   python -m xiaoyi_loop 117 127
-  python -m xiaoyi_loop 1-388 --judge-profile glm52
+  python -m xiaoyi_loop 1001-1005 --tasks-root path/to/custom_tasks
 """
 
 from __future__ import annotations
@@ -135,8 +135,6 @@ def _build_parser(settings: LocalSettings) -> argparse.ArgumentParser:
         help="runner 相邻任务间隔秒。",
     )
     parser.add_argument("--tail-lines", type=int, default=settings.tail_lines, help="runner 检查日志末尾事件数。")
-    parser.add_argument("--min-task", type=int, default=1, help="最小任务编号，默认 1。")
-    parser.add_argument("--max-task", type=int, default=388, help="最大任务编号，默认 388。")
     force_stop_group = parser.add_mutually_exclusive_group()
     force_stop_group.add_argument(
         "--force-stop",
@@ -773,8 +771,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             tasks = collect_task_specs(
                 args.tasks,
                 tasks_root=args.tasks_root,
-                min_task=args.min_task,
-                max_task=args.max_task,
             )
         except ValueError as exc:
             print(f"参数错误：{exc}", file=sys.stderr)

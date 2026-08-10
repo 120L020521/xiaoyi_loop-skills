@@ -47,7 +47,10 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         action="append",
         default=[],
-        help="用户明确提供的 Task 目录或 Task 根目录；可重复。",
+        help=(
+            "用户明确提供的精确 Task 目录或数据集根目录；可重复。"
+            "数据集根目录必须配合 Task ID selector。"
+        ),
     )
     parser.add_argument("--tasks-root", help="Task metadata 根目录。")
     parser.add_argument("--hdc", help="hdc 命令或可执行文件路径。")
@@ -62,8 +65,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--settle", type=float)
     parser.add_argument("--restart-delay", type=float)
     parser.add_argument("--tail-lines", type=int)
-    parser.add_argument("--min-task", type=int)
-    parser.add_argument("--max-task", type=int)
     force_group = parser.add_mutually_exclusive_group()
     force_group.add_argument("--force-stop", action="store_true")
     force_group.add_argument("--no-force-stop", action="store_true")
@@ -99,8 +100,6 @@ def _pipeline_arguments(
     _append_value(arguments, "--settle", args.settle)
     _append_value(arguments, "--restart-delay", args.restart_delay)
     _append_value(arguments, "--tail-lines", args.tail_lines)
-    _append_value(arguments, "--min-task", args.min_task)
-    _append_value(arguments, "--max-task", args.max_task)
     for enabled, flag in (
         (args.dynamic_date, "--dynamic-date"),
         (args.force_stop, "--force-stop"),
@@ -151,8 +150,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             workspace=workspace,
             explicit_locations=explicit_locations,
             configured_root=configured_root,
-            min_task=args.min_task or 1,
-            max_task=args.max_task or 388,
         )
     except (TaskLocationError, ValueError) as exc:
         print(f"Task 定位失败：{exc}", file=sys.stderr)

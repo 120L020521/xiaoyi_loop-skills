@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-在工作机读取 WorkspaceBench metadata.json，批量向鸿蒙 PC 小艺发送 task 并拉取日志与 output。
+在工作机读取 XiaoYi Task metadata.json，批量向鸿蒙 PC 小艺发送 task 并拉取日志与 output。
 
 示例：
   python batch_runner.py 117 127 --tasks-root path/to/tasks
   python batch_runner.py path/to/tasks/127/metadata.json
-  python batch_runner.py 1-388 --tasks-root path/to/tasks
+  python batch_runner.py 1001-1005 --tasks-root path/to/custom_tasks
 
 完成判定：
   新 session 中出现 agent_role == "main" 且 payload.assistant.stop_reason == "stop"。
@@ -145,7 +145,7 @@ def remote_shell(command: str, *, target: str | None, timeout: int = SHELL_TIMEO
     return run_hdc([*target_args(target), "shell", command], timeout=timeout, verbose=verbose)
 
 
-def parse_tasks(parts: Iterable[str], *, min_task: int, max_task: int) -> list[int]:
+def parse_tasks(parts: Iterable[str]) -> list[int]:
     tasks: list[int] = []
     seen: set[int] = set()
 
@@ -164,8 +164,6 @@ def parse_tasks(parts: Iterable[str], *, min_task: int, max_task: int) -> list[i
                 raise ValueError(f"无法识别任务编号：{token!r}，可用格式示例：1-10,13,20")
 
             for number in numbers:
-                if number < min_task or number > max_task:
-                    raise ValueError(f"任务编号越界：{number}，允许范围是 {min_task}-{max_task}")
                 if number not in seen:
                     tasks.append(number)
                     seen.add(number)
@@ -179,7 +177,7 @@ def _looks_like_metadata_path(value: str) -> bool:
     return value.lower().endswith(".json") or "/" in value or "\\" in value or bool(re.match(r"^[A-Za-z]:", value))
 
 
-def load_task_spec(metadata_path: Path, *, min_task: int, max_task: int) -> TaskSpec:
+def load_task_spec(metadata_path: Path) -> TaskSpec:
     path = metadata_path.expanduser().resolve()
     if path.is_dir():
         path = path / "metadata.json"
@@ -213,8 +211,8 @@ def load_task_spec(metadata_path: Path, *, min_task: int, max_task: int) -> Task
     task_id = raw_id if raw_id is not None else parent_id
     if task_id is None:
         raise ValueError(f"无法从 absolute_id 或父目录确定任务 ID：{path}")
-    if task_id < min_task or task_id > max_task:
-        raise ValueError(f"任务编号越界：{task_id}，允许范围是 {min_task}-{max_task}")
+    if task_id < 0:
+        raise ValueError(f"任务 ID 必须是非负整数：{task_id}：{path}")
     return TaskSpec(task_id=task_id, metadata_path=path, task_text=task_text.strip())
 
 
@@ -222,8 +220,6 @@ def collect_task_specs(
     parts: Iterable[str],
     *,
     tasks_root: str | None,
-    min_task: int,
-    max_task: int,
 ) -> list[TaskSpec]:
     root: Path | None = None
     if tasks_root:
@@ -240,11 +236,11 @@ def collect_task_specs(
         else:
             if root is None:
                 raise ValueError(f"使用任务编号 {raw!r} 时必须提供 --tasks-root。")
-            task_ids = parse_tasks([raw], min_task=min_task, max_task=max_task)
+            task_ids = parse_tasks([raw])
             candidates = [root / str(task_id) / "metadata.json" for task_id in task_ids]
 
         for metadata_path in candidates:
-            spec = load_task_spec(metadata_path, min_task=min_task, max_task=max_task)
+            spec = load_task_spec(metadata_path)
             if spec.task_id in seen_ids:
                 raise ValueError(f"重复任务 ID：{spec.task_id}")
             seen_ids.add(spec.task_id)
@@ -762,14 +758,14 @@ def wait_for_task_done(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="从本机 WorkspaceBench metadata.json 提取 task，批量发送给鸿蒙 PC 小艺并拉取日志与 output。"
+        description="从本机 XiaoYi Task metadata.json 提取任务，批量发送给鸿蒙 PC 小艺并拉取日志与 output。"
     )
     parser.add_argument(
         "tasks",
         nargs="+",
         help="metadata.json/任务目录，或配合 --tasks-root 使用的任务编号（支持 1-10、1..10、1-10,13,20）。",
     )
-    parser.add_argument("--tasks-root", help="本机 tasks_lite 根目录；使用任务编号时必须提供。")
+    parser.add_argument("--tasks-root", help="本机 Task 数据集根目录；使用任务编号时必须提供。")
     parser.add_argument("--target", help="hdc 目标 connect key；不填时使用 hdc 默认目标。")
     parser.add_argument("--user-id", help="taichu_data 下的 user_id；不填时自动扫描所有 user_id。")
     parser.add_argument("--date", dest="date_id", help="日志日期 ID，例如 20260629；不填则启动时取本机当天日期。")
@@ -780,8 +776,6 @@ def main() -> int:
     parser.add_argument("--settle", type=float, default=1.5, help="检测完成后拉日志前等待秒数，默认 1.5。")
     parser.add_argument("--restart-delay", type=float, default=5.0, help="相邻任务间等待秒数，默认 5。")
     parser.add_argument("--tail-lines", type=int, default=300, help="每次检查日志末尾行数，默认 300。")
-    parser.add_argument("--min-task", type=int, default=1, help="最小任务编号，默认 1。")
-    parser.add_argument("--max-task", type=int, default=388, help="最大任务编号，默认 388。")
     parser.add_argument("--no-force-stop", action="store_true", help="任务完成后不执行 aa force-stop。")
     parser.add_argument("--continue-on-error", action="store_true", help="兼容选项；现在默认会在单个任务失败后继续。")
     parser.add_argument("--stop-on-error", action="store_true", help="某个任务失败后立即结束整个批次。")
@@ -792,8 +786,6 @@ def main() -> int:
         tasks = collect_task_specs(
             args.tasks,
             tasks_root=args.tasks_root,
-            min_task=args.min_task,
-            max_task=args.max_task,
         )
     except ValueError as exc:
         print(f"参数错误：{exc}", file=sys.stderr)

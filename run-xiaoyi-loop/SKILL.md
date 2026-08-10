@@ -1,7 +1,7 @@
 ---
 name: run-xiaoyi-loop
 description: >-
-  Run specified XiaoYi Loop Workspace-Bench tasks through HDC, collect logs and outputs, then Judge each task with one isolated Codex subagent instead of an external Judge API. Use when users ask to “运行/执行几个 task 并给出 Judge 报告”, “诊断/检查指定 task ID 的日志”, batch-Judge newly collected XiaoYi logs, Judge selected existing logs, or summarize XiaoYi task scores and failures. This workflow does not require a Judge API key.
+  Run specified XiaoYi Task datasets, including Workspace-Bench and custom datasets, through HDC, collect logs and outputs, then Judge each task with one isolated Codex subagent instead of an external Judge API. Use when users ask to run task IDs from workspace folders such as task, task1, filestask, or any folder whose name contains task; batch-Judge newly collected XiaoYi logs; Judge selected existing logs; or summarize XiaoYi task scores and failures. This workflow does not require a Judge API key.
 ---
 
 # Run XiaoYi Loop with Agent Judge
@@ -22,6 +22,11 @@ the project configuration and generated artifacts as the source of truth.
 - Start Runner exactly once for the requested batch. Wait on that same process for each Task's
   configured timeout; never relaunch Runner automatically after silence, output truncation, or
   an unexpected process exit.
+- Preserve every directory-to-ID pair stated by the user. A request such as
+  `A\\task 下的 112 和 B\\filetask 下的 39` is already fully disambiguated: build the exact
+  Task paths `A\\task\\112` and `B\\filetask\\39`, then pass both in one Runner invocation.
+  Never omit those IDs, run a partial/probe batch, or ask the user for selectors they already
+  supplied.
 - Keep runtime artifacts in the Agent workspace by default: `<agent_workspace>/xiaoyi_logs`,
   `<agent_workspace>/xiaoyi_judge`, and `<agent_workspace>/pipeline_state.json`. Never treat
   `<skill_root>` as their default destination.
@@ -37,21 +42,51 @@ the project configuration and generated artifacts as the source of truth.
 
 ## Resolve inputs
 
-1. Accept individual IDs, multiple IDs, `1-10`, `1..10`, and comma-separated combinations.
+1. Accept any non-negative integer ID, multiple IDs, `1-10`, `1..10`, and comma-separated
+   combinations. Do not impose a Workspace-Bench-specific minimum or maximum ID.
 2. Resolve the Task location in this order:
    - a directory or `metadata.json` explicitly supplied by the user;
-   - the Agent's current workspace: `metadata.json`, `task/metadata.json`,
-     `task/<ID>/metadata.json`, `tasks/<ID>/metadata.json`, or `<ID>/metadata.json`;
+   - a user-named dataset root such as `<workspace>/filestask`, passed with
+     `--task-dir`, plus the requested ID;
+   - the Agent's current workspace: `metadata.json`, `<ID>/metadata.json`, or any
+     immediate child directory whose name contains `task` case-insensitively, with
+     either `<dataset>/metadata.json` or `<dataset>/<ID>/metadata.json`;
    - `paths.tasks_root` only when the user previously configured it deliberately.
 3. Never write a Task-data path into Skill source or assume the Skill directory contains the
-   user's tasks. If no candidate exists, or several candidates remain without a selector, ask
-   the user for the Task directory before running HDC.
+   user's tasks. If the user names a dataset path, preserve that scope instead of searching a
+   different dataset. If no candidate exists, or the requested ID exists in multiple datasets,
+   ask the user for the Task dataset directory before running HDC.
 4. Treat a directory containing `metadata.json` as one Task. Read its `absolute_id` for the
    Task ID and its non-empty `task` field for the HDC query. Require a non-empty string list in
    `rubrics` before HDC starts. Preserve the existing operational query suffix used by the
    Runner.
-5. Ask for a selector only when several discovered tasks need disambiguation. An explicit
-   request to Judge every existing canonical Trace needs no selector.
+5. Ask for a selector only when several discovered tasks need disambiguation. Dataset folders
+   may reuse integer IDs; never choose between duplicate IDs without an explicit dataset root.
+   An explicit request to Judge every existing canonical Trace needs no selector.
+
+### Preserve directory-ID bindings
+
+Parse user requests into ordered `(dataset_root, task_id)` pairs before constructing any
+command. When two or more pairs use different dataset roots, prefer exact Task paths as
+positional arguments:
+
+```powershell
+& <python> -B "<skill_root>\scripts\run_tasks.py" `
+  "D:\SKILL\0810\task\112" `
+  "D:\SKILL\0810\filetask\39" `
+  --workspace "<agent_workspace>"
+```
+
+This is one batch and one Runner start. Do not first invoke Runner with only `--task-dir`
+values and then retry with IDs. Use `--task-dir <dataset_root>` only together with positional
+ID selectors. Repeated `--task-dir` values that each point directly to one Task directory
+containing `metadata.json` are also complete and require no selectors.
+
+Treat an absolute path supplied by the user as a path on the host where `run_tasks.py` will
+execute. Preserve it verbatim; do not reinterpret it relative to a different machine's current
+workspace. Resolve the entire requested batch before HDC starts. If any exact Task path is
+missing or invalid, stop the whole batch before submission instead of running the resolvable
+subset.
 
 ## Prepare the environment
 
@@ -103,7 +138,8 @@ For a new run, invoke only the runner phase:
 ```
 
 Omit `<task-selectors>` when the workspace contains exactly one Task. When the user supplied a
-directory, add `--task-dir "<user_task_path>"`. Before HDC starts, verify the script prints the
+dataset directory, add `--task-dir "<user_dataset_path>"`; a single Task directory or its
+`metadata.json` may also be passed directly. Before HDC starts, verify the script prints the
 resolved `metadata.json` for every Task. The Runner reads `metadata.task`, sends it as the query,
 waits for completion, and pulls the JSONL log plus declared outputs. Unless explicitly
 overridden, `<logs_dir>` means `<agent_workspace>/xiaoyi_logs`, `<run_dir>` means

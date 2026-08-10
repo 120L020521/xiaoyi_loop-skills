@@ -7,7 +7,8 @@ version = 1
 
 [paths]
 # 可选回退路径。通常由 Agent 从当前工作目录的 task/ 自动发现；只有希望长期固定
-# 一个包含 <task_id>/metadata.json 的根目录时才填写。
+# 一个包含 <task_id>/metadata.json 的业务数据集根目录时才填写；工作区中可以同时存在
+# task、task1、filestask 等多个名称包含 task 的数据集目录。
 tasks_root = ""
 # 默认分别写入 <工作目录>/xiaoyi_logs、<工作目录>/xiaoyi_judge 和
 # <工作目录>/pipeline_state.json。

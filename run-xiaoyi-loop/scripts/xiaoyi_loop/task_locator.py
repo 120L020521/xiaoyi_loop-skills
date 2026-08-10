@@ -1,4 +1,4 @@
-"""Locate Workspace-Bench task directories without machine-specific paths."""
+"""Locate XiaoYi Task datasets without machine-specific paths."""
 
 from __future__ import annotations
 
@@ -36,8 +36,16 @@ def _metadata_paths_at(location: Path) -> list[Path]:
     )
 
 
+def _is_exact_task_location(location: Path) -> bool:
+    """Return whether a user supplied one concrete Task rather than a dataset root."""
+    path = location.expanduser().resolve()
+    if path.is_file():
+        return path.name.casefold() == "metadata.json"
+    return path.is_dir() and (path / "metadata.json").is_file()
+
+
 def discover_workspace_metadata(workspace: Path) -> list[Path]:
-    """Discover conventional Task layouts directly below an Agent workspace."""
+    """Discover Task metadata in generic task-named workspace datasets."""
     root = workspace.expanduser().resolve()
     if not root.is_dir():
         raise TaskLocationError(f"Agent 工作目录不存在：{root}")
@@ -45,7 +53,18 @@ def discover_workspace_metadata(workspace: Path) -> list[Path]:
     direct = root / "metadata.json"
     if direct.is_file():
         candidates.append(direct.resolve())
-    for location in (root / "task", root / "tasks"):
+    try:
+        task_roots = sorted(
+            (
+                location
+                for location in root.iterdir()
+                if location.is_dir() and "task" in location.name.casefold()
+            ),
+            key=lambda location: location.name.casefold(),
+        )
+    except OSError as exc:
+        raise TaskLocationError(f"无法扫描 Agent 工作目录：{root}：{exc}") from exc
+    for location in task_roots:
         candidates.extend(_metadata_paths_at(location))
     candidates.extend(
         candidate.resolve()
@@ -61,19 +80,21 @@ def discover_workspace_metadata(workspace: Path) -> list[Path]:
 def _load_specs(
     paths: Iterable[Path],
     *,
-    min_task: int,
-    max_task: int,
+    allow_duplicate_ids: bool = False,
 ) -> list[TaskSpec]:
     specs: list[TaskSpec] = []
     seen: dict[int, Path] = {}
     for path in paths:
-        spec = load_task_spec(path, min_task=min_task, max_task=max_task)
+        spec = load_task_spec(path)
         previous = seen.get(spec.task_id)
         if previous is not None and previous != spec.metadata_path:
-            raise TaskLocationError(
-                f"Task {spec.task_id} 对应多个 metadata.json：{previous}；"
-                f"{spec.metadata_path}"
-            )
+            if not allow_duplicate_ids:
+                raise TaskLocationError(
+                    f"Task {spec.task_id} 对应多个 metadata.json：{previous}；"
+                    f"{spec.metadata_path}。请明确指定数据集目录。"
+                )
+            specs.append(spec)
+            continue
         if previous is None:
             seen[spec.task_id] = spec.metadata_path
             specs.append(spec)
@@ -83,13 +104,23 @@ def _load_specs(
 def _candidate_specs(
     locations: Iterable[Path],
     *,
-    min_task: int,
-    max_task: int,
+    requested_ids: Sequence[int] = (),
 ) -> list[TaskSpec]:
     paths: list[Path] = []
     for location in locations:
-        paths.extend(_metadata_paths_at(location))
-    return _load_specs(paths, min_task=min_task, max_task=max_task)
+        resolved = location.expanduser().resolve()
+        direct = resolved / "metadata.json" if resolved.is_dir() else None
+        if requested_ids and resolved.is_dir() and not (
+            direct is not None and direct.is_file()
+        ):
+            paths.extend(
+                metadata.resolve()
+                for task_id in requested_ids
+                if (metadata := resolved / str(task_id) / "metadata.json").is_file()
+            )
+        else:
+            paths.extend(_metadata_paths_at(resolved))
+    return _load_specs(paths)
 
 
 def _select_ids(
@@ -97,8 +128,6 @@ def _select_ids(
     sources: Sequence[tuple[str, Sequence[TaskSpec]]],
     *,
     configured_root: Path | None,
-    min_task: int,
-    max_task: int,
 ) -> LocatedTasks:
     selected: list[TaskSpec] = []
     used_sources: list[str] = []
@@ -116,17 +145,13 @@ def _select_ids(
                 matches.append(
                     (
                         "config",
-                        load_task_spec(
-                            metadata,
-                            min_task=min_task,
-                            max_task=max_task,
-                        ),
+                        load_task_spec(metadata),
                     )
                 )
         if not matches:
             raise TaskLocationError(
                 f"找不到 Task {task_id} 的 metadata.json。请告诉我 Task 目录，"
-                "或把它放在当前工作目录的 task/ 下。"
+                "或把它放在当前工作目录下名称包含 task 的数据集目录中。"
             )
         if len(matches) > 1:
             paths = "；".join(str(spec.metadata_path) for _, spec in matches)
@@ -144,8 +169,6 @@ def resolve_task_specs(
     workspace: Path,
     explicit_locations: Sequence[Path] = (),
     configured_root: Path | None = None,
-    min_task: int = 1,
-    max_task: int = 388,
     allow_many_without_selectors: bool = False,
 ) -> LocatedTasks:
     """Resolve paths by explicit input, workspace-relative discovery, then config."""
@@ -160,83 +183,108 @@ def resolve_task_specs(
         else:
             numeric_selectors.append(selector)
 
+    requested_ids = parse_tasks(numeric_selectors) if numeric_selectors else []
     direct_specs = _candidate_specs(
         direct_paths,
-        min_task=min_task,
-        max_task=max_task,
+        requested_ids=requested_ids,
     )
     explicit_specs = _candidate_specs(
         explicit_locations,
-        min_task=min_task,
-        max_task=max_task,
+        requested_ids=requested_ids,
     )
-    excluded_metadata = {
-        spec.metadata_path for spec in (*direct_specs, *explicit_specs)
-    }
-    workspace_specs = _load_specs(
-        (
+
+    # A concrete metadata path or Task directory is authoritative. Avoid scanning
+    # unrelated datasets, which may legitimately reuse the same integer IDs.
+    if direct_specs and not requested_ids:
+        return LocatedTasks(specs=tuple(direct_specs), source="explicit")
+
+    # Repeated --task-dir values that each point to one concrete Task are fully
+    # specified and need no redundant numeric selectors.
+    if (
+        explicit_specs
+        and not requested_ids
+        and all(_is_exact_task_location(path) for path in explicit_locations)
+    ):
+        return LocatedTasks(specs=tuple(explicit_specs), source="explicit")
+
+    workspace_specs: list[TaskSpec] = []
+    if not explicit_locations:
+        excluded_metadata = {
+            spec.metadata_path for spec in (*direct_specs, *explicit_specs)
+        }
+        workspace_paths = (
             path
             for path in discover_workspace_metadata(root)
             if path not in excluded_metadata
-        ),
-        min_task=min_task,
-        max_task=max_task,
-    )
-
-    requested_ids = (
-        parse_tasks(
-            numeric_selectors,
-            min_task=min_task,
-            max_task=max_task,
+            and (
+                not requested_ids
+                or not path.parent.name.isdigit()
+                or int(path.parent.name) in requested_ids
+            )
         )
-        if numeric_selectors
-        else []
-    )
+        workspace_specs = _load_specs(
+            workspace_paths,
+            allow_duplicate_ids=True,
+        )
+
     if requested_ids:
+        selection_sources: list[tuple[str, Sequence[TaskSpec]]] = [
+            ("explicit", direct_specs)
+        ]
+        selection_sources.extend(
+            (("explicit", explicit_specs),)
+            if explicit_locations
+            else (("workspace", workspace_specs),)
+        )
         located = _select_ids(
             requested_ids,
-            (
-                ("explicit", explicit_specs),
-                ("workspace", workspace_specs),
-            ),
-            configured_root=configured_root,
-            min_task=min_task,
-            max_task=max_task,
+            selection_sources,
+            configured_root=None if explicit_locations else configured_root,
         )
         combined = [*direct_specs, *located.specs]
         return LocatedTasks(
             specs=tuple(
                 _load_specs(
                     (spec.metadata_path for spec in combined),
-                    min_task=min_task,
-                    max_task=max_task,
                 )
             ),
             source=located.source if not direct_specs else "mixed",
         )
 
-    if direct_specs:
-        return LocatedTasks(specs=tuple(direct_specs), source="explicit")
-
     candidates = explicit_specs if explicit_specs else workspace_specs
     source = "explicit" if explicit_specs else "workspace"
-    if not candidates and configured_root is not None:
-        candidates = _candidate_specs(
-            (configured_root,),
-            min_task=min_task,
-            max_task=max_task,
-        )
+    if not candidates and configured_root is not None and not explicit_locations:
+        candidates = _candidate_specs((configured_root,))
         source = "config"
     if not candidates:
+        if explicit_locations:
+            supplied = "；".join(str(path) for path in explicit_locations)
+            raise TaskLocationError(
+                "显式 Task 路径没有解析到 metadata.json："
+                f"{supplied}。若提供的是数据集根目录，请同时传入 Task ID；"
+                "若用户已指定目录和 ID，请传入精确的 <数据集>/<ID> 目录。"
+            )
         raise TaskLocationError(
             "没有找到 Task 目录。请告诉我 Task 目录，或在当前工作目录下提供 "
-            "task/metadata.json（批量时为 task/<ID>/metadata.json）。"
+            "名称包含 task 的数据集目录，例如 task/<ID>/metadata.json 或 "
+            "filestask/<ID>/metadata.json。"
         )
     if len(candidates) > 1 and not allow_many_without_selectors:
         paths = "\n  - " + "\n  - ".join(
             str(spec.metadata_path) for spec in candidates
         )
+        if explicit_locations:
+            raise TaskLocationError(
+                "--task-dir 指向的数据集包含多个 Task。请把用户给出的 ID 作为 "
+                "selector，或把每个“目录 + ID”组合成精确的 <数据集>/<ID> "
+                "Task 目录，并在一次 Runner 调用中全部传入：" + paths
+            )
         raise TaskLocationError(
             "当前工作目录中发现多个 Task，请指定 Task ID 或明确目录：" + paths
         )
-    return LocatedTasks(specs=tuple(candidates), source=source)
+    return LocatedTasks(
+        specs=tuple(
+            _load_specs(spec.metadata_path for spec in candidates)
+        ),
+        source=source,
+    )

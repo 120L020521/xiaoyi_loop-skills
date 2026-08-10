@@ -50,7 +50,10 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         action="append",
         default=[],
-        help="用户明确提供的 Task 目录或 Task 根目录；可重复。",
+        help=(
+            "用户明确提供的精确 Task 目录或数据集根目录；可重复。"
+            "数据集根目录必须配合 --task-id。"
+        ),
     )
     parser.add_argument("--logs-dir", type=Path, help="覆盖配置中的日志目录。")
     parser.add_argument("--tasks-root", type=Path, help="覆盖配置中的 Task 根目录。")
