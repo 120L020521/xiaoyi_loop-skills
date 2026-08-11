@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Iterable
 
-REPORT_SCHEMA_VERSION = 5
-REQUIRED_TOP_LEVEL_FIELDS = ("schema_version", "report_summary", "diagnosis", "proposed_changes")
-DIAGNOSIS_ARRAY_FIELDS = ("evidence_chain", "error_span_inventory", "failure_chronology")
+REPORT_SCHEMA_VERSION = 6
+REQUIRED_TOP_LEVEL_FIELDS = (
+    "schema_version",
+    "report_summary",
+    "diagnosis",
+    "proposed_changes",
+)
 EXECUTION_CLASSIFICATIONS = (
     "FAILED",
     "SUCCEEDED_WITH_RECOVERED_ERRORS",
@@ -16,141 +21,141 @@ EXECUTION_CLASSIFICATIONS = (
     "UNKNOWN",
 )
 PRIORITIES = ("P0", "P1", "P2", "P3", "P4")
-REPORT_SUMMARY_REQUIRED_FIELDS = ("title", "protocol", "trace_ids")
-REPORT_SUMMARY_OPTIONAL_FIELDS = ("judge_summary", "task", "expected_output_files")
+EVIDENCE_SOURCES = ("TRACE", "TASK", "JUDGE", "SOURCE_FILE", "OUTPUT_FILE")
+RECOVERY_STATUSES = ("RECOVERED", "UNRECOVERED", "UNPROVEN", "NOT_APPLICABLE")
+REPORT_SUMMARY_REQUIRED_FIELDS = ("task_id", "task", "trace_ids")
+REPORT_SUMMARY_OPTIONAL_FIELDS = ("expected_output_files", "judge_summary")
 DIAGNOSIS_REQUIRED_FIELDS = (
     "execution_classification",
     "primary_failure_mode",
-    "conclusion",
-    *DIAGNOSIS_ARRAY_FIELDS,
+    "error_findings",
 )
-DIAGNOSIS_OPTIONAL_FIELDS = ("task_and_output_files_assessment",)
 DIAGNOSIS_CANONICAL_FIELDS = (
     "execution_classification",
-    "task_and_output_files_assessment",
     "primary_failure_mode",
-    "conclusion",
-    *DIAGNOSIS_ARRAY_FIELDS,
+    "error_findings",
 )
-EVIDENCE_FIELDS = (
-    "priority",
-    "trace_id",
-    "span_id",
-    "timestamp",
-    "operation",
-    "tool_name",
-    "arguments",
-    "result",
-    "error",
-    "recovery",
-    "impact",
-    "occurrence_count",
-)
-ERROR_INVENTORY_FIELDS = (
+ERROR_FIELDS = (
+    "error_id",
     "priority",
     "category",
-    "tool_name",
-    "occurrence_count",
-    "error_summary",
-    "sample_span_ids",
-)
-CHRONOLOGY_FIELDS = ("timestamp", "priority", "span_id", "event", "consequence")
-OUTPUT_ASSESSMENT_FIELDS = (
-    "expected_output_files",
-    "actual_output_files",
-    "impact",
-    "evidence",
-)
-PROPOSED_CHANGE_FIELDS = (
-    "component",
-    "priority",
     "title",
+    "occurrence_count",
+    "summary",
+    "evidence",
+    "root_cause",
+    "recovery_status",
+    "impact",
+)
+EVIDENCE_FIELDS = ("source", "reference", "tool", "fact", "error")
+PROPOSED_CHANGE_FIELDS = (
+    "priority",
+    "component",
+    "target",
+    "title",
+    "error_refs",
     "problem",
     "implementation",
+    "acceptance_criteria",
     "expected_impact",
-    "target",
 )
 REPORT_STRUCTURE_GUIDANCE = (
-    "Use exactly the shown fields and nesting; do not add ad-hoc fields. Keep evidence_chain, "
-    "error_span_inventory, and failure_chronology inside diagnosis, and keep proposed_changes "
-    "top-level. Write human-facing diagnosis and proposed_changes narratives in Simplified "
-    "Chinese. Keep JSON keys, enums, priorities, ids, timestamps, component/target values, "
-    "tool names, paths, filenames, and raw arguments/results/errors unchanged. Every evidence "
-    "item must contain the fixed v5 fields; use an empty string for an unavailable scalar and "
-    "occurrence_count=1 for a single observation. When evaluator "
-    "context supplies task and expected_output_files, copy both unchanged into report_summary. "
-    "The optional diagnosis.task_and_output_files_assessment object is allowed only when output "
-    "files are missing, misplaced, misnamed, corrupt, or materially incorrect; when present it "
-    "must contain exactly expected_output_files, actual_output_files, impact, and evidence, and "
-    "it must appear immediately after execution_classification and before primary_failure_mode. "
-    "Omit that object when no output problem is supported. Keep the error inventory "
-    "aggregate-only, and use [] when a section has no evidence. FAILED reports require exactly "
-    "3-5 proposed_changes; every other execution classification allows 0-5 and must use [] when "
-    "no trace-supported change is warranted."
+    "Use exactly the shown v6 fields and nesting; do not add ad-hoc fields. Group each "
+    "distinct material problem into one diagnosis.error_findings item. Do not repeat the same "
+    "spans in a generic tool-failure finding and a second semantic finding; split findings "
+    "by root cause. Summarize the dominant root cause briefly in primary_failure_mode. "
+    "Use P0-P4 only "
+    "on error_findings and proposed_changes as relative ranking labels. Evidence "
+    "has no id or priority: use source plus reference to identify TRACE spans, TASK/JUDGE "
+    "items, or source/output files. Preserve raw error text; write error titles, summaries, "
+    "facts, root causes, impacts, change titles/problems/implementations/acceptance criteria/"
+    "impacts in Simplified Chinese. Keep JSON keys, enums, priorities, task/trace/span ids, "
+    "component/target values, tool names, paths, filenames, and raw errors unchanged. Every "
+    "proposed change must reference one or more existing error ids. Copy "
+    "the resolved task_id and task from Context; use the explicit MISSING context value when unavailable. "
+    "Copy expected_output_files unchanged when supplied and omit it when missing. Include "
+    "judge_summary only when Judge context exists. Use [] when no error findings or changes are "
+    "supported. FAILED reports require exactly 3-5 proposed_changes; every other execution "
+    "classification allows 0-5."
 )
 
 
-def build_report(*, report_summary: dict[str, Any],
-                 proposed_changes: list[dict[str, Any]] | None = None,
-                 **diagnosis: Any) -> dict[str, Any]:
-    """Build a report with the canonical v5 nesting."""
+def build_report(
+    *,
+    report_summary: dict[str, Any],
+    proposed_changes: list[dict[str, Any]] | None = None,
+    **diagnosis: Any,
+) -> dict[str, Any]:
+    """Build a report with canonical v6 nesting."""
     diagnosis = dict(diagnosis)
-    for field in DIAGNOSIS_ARRAY_FIELDS:
-        diagnosis.setdefault(field, [])
-    ordered_diagnosis = {
-        field: diagnosis[field]
-        for field in DIAGNOSIS_CANONICAL_FIELDS
-        if field in diagnosis
-    }
-    ordered_diagnosis.update(
-        (field, value)
-        for field, value in diagnosis.items()
-        if field not in ordered_diagnosis
-    )
+    diagnosis.setdefault("error_findings", [])
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "report_summary": report_summary,
-        "diagnosis": ordered_diagnosis,
+        "diagnosis": {
+            field: diagnosis[field]
+            for field in DIAGNOSIS_CANONICAL_FIELDS
+            if field in diagnosis
+        },
         "proposed_changes": proposed_changes or [],
     }
 
 
-def render_report_example(components: Iterable[str], *,
-                          include_evaluator_context: bool = False) -> str:
+def render_report_example(
+    components: Iterable[str], *, include_evaluator_context: bool = False
+) -> str:
     """Render the compact schema example embedded in model prompts."""
     summary: dict[str, Any] = {
-        "title": "HALO RLM DIAGNOSTIC REPORT",
-        "protocol": "HALO RLM agent-driven",
+        "task_id": "task15" if include_evaluator_context else "MISSING",
+        "task": "根据源文件生成数据可视化图表。" if include_evaluator_context else "MISSING",
         "trace_ids": ["..."],
     }
     if include_evaluator_context:
-        summary.update({
-            "task": "...",
-            "expected_output_files": ["..."],
-            "judge_summary": "...",
-        })
+        summary.update(
+            {
+                "expected_output_files": ["output.xlsx"],
+                "judge_summary": "Judge指出数据提取和图表类型存在错误。",
+            }
+        )
     report = build_report(
         report_summary=summary,
         execution_classification="<classification>",
-        primary_failure_mode="主要失败模式说明",
-        conclusion="诊断结论说明",
-        evidence_chain=[{
-            "priority": "P0", "trace_id": "...", "span_id": "...",
-            "timestamp": "...", "operation": "...", "tool_name": "...",
-            "arguments": "...", "result": "...", "error": "...",
-            "recovery": "恢复情况说明", "impact": "影响说明", "occurrence_count": 1,
-        }],
-        error_span_inventory=[{
-            "priority": "P0", "category": "错误类别", "tool_name": "...",
-            "occurrence_count": 1, "error_summary": "错误摘要", "sample_span_ids": ["..."],
-        }],
-        failure_chronology=[{"timestamp": "...", "priority": "P0", "span_id": "...",
-                             "event": "事件说明", "consequence": "后果说明"}],
-        proposed_changes=[{
-            "component": "|".join(components), "priority": "P0", "title": "修改标题",
-            "problem": "问题说明", "implementation": "实施方案", "expected_impact": "预期影响",
-            "target": "...",
-        }],
+        primary_failure_mode="工具参数或环境与运行时不兼容，导致任务未完成预期操作。",
+        error_findings=[
+            {
+                "error_id": "ERR1",
+                "priority": "P0",
+                "category": "TOOL_FAILURE",
+                "title": "工具调用失败",
+                "occurrence_count": 1,
+                "summary": "Runner执行工具时发生错误。",
+                "evidence": [
+                    {
+                        "source": "TRACE",
+                        "reference": "...",
+                        "tool": "bash",
+                        "fact": "工具调用返回失败状态。",
+                        "error": "raw error",
+                    }
+                ],
+                "root_cause": "工具参数或环境与运行时不兼容。",
+                "recovery_status": "UNRECOVERED",
+                "impact": "任务未完成预期操作。",
+            }
+        ],
+        proposed_changes=[
+            {
+                "priority": "P0",
+                "component": "|".join(components),
+                "target": "...",
+                "title": "修复工具调用前置校验",
+                "error_refs": ["ERR1"],
+                "problem": "工具调用在不兼容环境中直接失败。",
+                "implementation": "调用前检查环境与参数并提供兼容路径。",
+                "acceptance_criteria": ["相同输入不再产生该工具错误。"],
+                "expected_impact": "避免重复失败并缩短执行时间。",
+            }
+        ],
     )
     return json.dumps(report, ensure_ascii=False, separators=(",", ":"))
 
@@ -197,22 +202,24 @@ def _contains_cjk(value: str) -> bool:
     )
 
 
-def _require_chinese_text(
-    value: Any,
-    path: str,
-    *,
-    allow_empty: bool = False,
-) -> None:
-    _require_string(value, path, allow_empty=allow_empty)
-    if value and not _contains_cjk(value):
+def _require_chinese_text(value: Any, path: str) -> None:
+    _require_string(value, path, allow_empty=False)
+    if not _contains_cjk(value):
         raise ValueError(
             f"model diagnostic report {path} must contain Simplified Chinese narrative text"
         )
 
 
-def _require_string_array(value: Any, path: str) -> None:
+def _require_string_array(
+    value: Any, path: str, *, non_empty: bool = False, chinese: bool = False
+) -> None:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ValueError(f"model diagnostic report {path} must be an array of strings")
+    if non_empty and (not value or any(not item.strip() for item in value)):
+        raise ValueError(f"model diagnostic report {path} must contain non-empty strings")
+    if chinese:
+        for index, item in enumerate(value):
+            _require_chinese_text(item, f"{path}[{index}]")
 
 
 def _require_positive_int(value: Any, path: str) -> None:
@@ -227,7 +234,7 @@ def _require_priority(value: Any, path: str) -> None:
         )
 
 
-def _validate_report_summary(value: Any) -> None:
+def _validate_report_summary(value: Any) -> dict[str, Any]:
     summary = _require_object(value, "report_summary")
     _validate_keys(
         summary,
@@ -235,88 +242,75 @@ def _validate_report_summary(value: Any) -> None:
         required=REPORT_SUMMARY_REQUIRED_FIELDS,
         optional=REPORT_SUMMARY_OPTIONAL_FIELDS,
     )
-    if summary["title"] != "HALO RLM DIAGNOSTIC REPORT":
-        raise ValueError(
-            "model diagnostic report report_summary.title must be "
-            "'HALO RLM DIAGNOSTIC REPORT'"
-        )
-    if summary["protocol"] != "HALO RLM agent-driven":
-        raise ValueError(
-            "model diagnostic report report_summary.protocol must be "
-            "'HALO RLM agent-driven'"
-        )
-    _require_string_array(summary["trace_ids"], "report_summary.trace_ids")
-    if not summary["trace_ids"] or any(not item.strip() for item in summary["trace_ids"]):
-        raise ValueError(
-            "model diagnostic report report_summary.trace_ids must contain non-empty strings"
-        )
-    for field in ("judge_summary", "task"):
-        if field in summary:
-            _require_string(summary[field], f"report_summary.{field}", allow_empty=False)
+    _require_string(summary["task_id"], "report_summary.task_id", allow_empty=False)
+    _require_string(summary["task"], "report_summary.task", allow_empty=False)
+    _require_string_array(summary["trace_ids"], "report_summary.trace_ids", non_empty=True)
     if "expected_output_files" in summary:
         _require_string_array(
             summary["expected_output_files"], "report_summary.expected_output_files"
         )
+    if "judge_summary" in summary:
+        _require_string(summary["judge_summary"], "report_summary.judge_summary", allow_empty=False)
+    return summary
 
 
-def _validate_evidence_item(value: Any, index: int) -> None:
-    path = f"diagnosis.evidence_chain[{index}]"
+def _validate_evidence(value: Any, error_index: int, evidence_index: int) -> None:
+    path = f"diagnosis.error_findings[{error_index}].evidence[{evidence_index}]"
     item = _require_object(value, path)
     _validate_keys(item, path, required=EVIDENCE_FIELDS)
-    _require_priority(item["priority"], f"{path}.priority")
-    for field in EVIDENCE_FIELDS:
-        if field not in ("priority", "occurrence_count"):
-            _require_string(item[field], f"{path}.{field}")
-    _require_chinese_text(item["recovery"], f"{path}.recovery", allow_empty=True)
-    _require_chinese_text(item["impact"], f"{path}.impact")
-    _require_positive_int(item["occurrence_count"], f"{path}.occurrence_count")
+    if item["source"] not in EVIDENCE_SOURCES:
+        raise ValueError(
+            f"model diagnostic report {path}.source must be one of: "
+            + ", ".join(EVIDENCE_SOURCES)
+        )
+    _require_string(item["reference"], f"{path}.reference", allow_empty=False)
+    _require_string(item["tool"], f"{path}.tool")
+    _require_chinese_text(item["fact"], f"{path}.fact")
+    _require_string(item["error"], f"{path}.error")
 
 
-def _validate_error_inventory_item(value: Any, index: int) -> None:
-    path = f"diagnosis.error_span_inventory[{index}]"
-    item = _require_object(value, path)
-    _validate_keys(item, path, required=ERROR_INVENTORY_FIELDS)
-    _require_priority(item["priority"], f"{path}.priority")
-    for field in ("category", "tool_name", "error_summary"):
-        _require_string(item[field], f"{path}.{field}")
-    _require_chinese_text(item["category"], f"{path}.category")
-    _require_chinese_text(item["error_summary"], f"{path}.error_summary")
-    _require_positive_int(item["occurrence_count"], f"{path}.occurrence_count")
-    _require_string_array(item["sample_span_ids"], f"{path}.sample_span_ids")
+def _validate_error_findings(value: Any) -> set[str]:
+    if not isinstance(value, list):
+        raise ValueError(
+            "model diagnostic report diagnosis.error_findings must be a JSON array"
+        )
+    error_ids: set[str] = set()
+    for index, raw_error in enumerate(value):
+        path = f"diagnosis.error_findings[{index}]"
+        diagnostic_error = _require_object(raw_error, path)
+        _validate_keys(diagnostic_error, path, required=ERROR_FIELDS)
+        error_id = diagnostic_error["error_id"]
+        if not isinstance(error_id, str) or not re.fullmatch(r"ERR[1-9]\d*", error_id):
+            raise ValueError(f"model diagnostic report {path}.error_id must match ERR<number>")
+        if error_id in error_ids:
+            raise ValueError(f"model diagnostic report has duplicate error_id: {error_id}")
+        error_ids.add(error_id)
+        _require_priority(diagnostic_error["priority"], f"{path}.priority")
+        category = diagnostic_error["category"]
+        if not isinstance(category, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", category):
+            raise ValueError(
+                f"model diagnostic report {path}.category must be UPPER_SNAKE_CASE"
+            )
+        for field in ("title", "summary", "root_cause", "impact"):
+            _require_chinese_text(diagnostic_error[field], f"{path}.{field}")
+        _require_positive_int(
+            diagnostic_error["occurrence_count"], f"{path}.occurrence_count"
+        )
+        if diagnostic_error["recovery_status"] not in RECOVERY_STATUSES:
+            raise ValueError(
+                f"model diagnostic report {path}.recovery_status must be one of: "
+                + ", ".join(RECOVERY_STATUSES)
+            )
+        if not isinstance(diagnostic_error["evidence"], list) or not diagnostic_error["evidence"]:
+            raise ValueError(f"model diagnostic report {path}.evidence must be a non-empty array")
+        for evidence_index, evidence in enumerate(diagnostic_error["evidence"]):
+            _validate_evidence(evidence, index, evidence_index)
+    return error_ids
 
 
-def _validate_chronology_item(value: Any, index: int) -> None:
-    path = f"diagnosis.failure_chronology[{index}]"
-    item = _require_object(value, path)
-    _validate_keys(item, path, required=CHRONOLOGY_FIELDS)
-    _require_priority(item["priority"], f"{path}.priority")
-    for field in CHRONOLOGY_FIELDS:
-        if field != "priority":
-            _require_string(item[field], f"{path}.{field}")
-    _require_chinese_text(item["event"], f"{path}.event")
-    _require_chinese_text(item["consequence"], f"{path}.consequence")
-
-
-def _validate_output_assessment(value: Any) -> None:
-    path = "diagnosis.task_and_output_files_assessment"
-    assessment = _require_object(value, path)
-    _validate_keys(assessment, path, required=OUTPUT_ASSESSMENT_FIELDS)
-    _require_string_array(
-        assessment["expected_output_files"], f"{path}.expected_output_files"
-    )
-    _require_string_array(assessment["actual_output_files"], f"{path}.actual_output_files")
-    _require_chinese_text(assessment["impact"], f"{path}.impact")
-    _require_chinese_text(assessment["evidence"], f"{path}.evidence")
-
-
-def _validate_diagnosis(value: Any) -> None:
+def _validate_diagnosis(value: Any) -> set[str]:
     diagnosis = _require_object(value, "diagnosis")
-    _validate_keys(
-        diagnosis,
-        "diagnosis",
-        required=DIAGNOSIS_REQUIRED_FIELDS,
-        optional=DIAGNOSIS_OPTIONAL_FIELDS,
-    )
+    _validate_keys(diagnosis, "diagnosis", required=DIAGNOSIS_REQUIRED_FIELDS)
     classification = diagnosis["execution_classification"]
     if classification not in EXECUTION_CLASSIFICATIONS:
         raise ValueError(
@@ -324,29 +318,19 @@ def _validate_diagnosis(value: Any) -> None:
             + ", ".join(EXECUTION_CLASSIFICATIONS)
         )
     _require_chinese_text(
-        diagnosis["primary_failure_mode"],
-        "diagnosis.primary_failure_mode",
+        diagnosis["primary_failure_mode"], "diagnosis.primary_failure_mode"
     )
-    _require_chinese_text(diagnosis["conclusion"], "diagnosis.conclusion")
-    for field in DIAGNOSIS_ARRAY_FIELDS:
-        if not isinstance(diagnosis[field], list):
-            raise ValueError(
-                f"model diagnostic report diagnosis.{field} must be a JSON array"
-            )
-    for index, item in enumerate(diagnosis["evidence_chain"]):
-        _validate_evidence_item(item, index)
-    for index, item in enumerate(diagnosis["error_span_inventory"]):
-        _validate_error_inventory_item(item, index)
-    for index, item in enumerate(diagnosis["failure_chronology"]):
-        _validate_chronology_item(item, index)
-    if "task_and_output_files_assessment" in diagnosis:
-        _validate_output_assessment(diagnosis["task_and_output_files_assessment"])
+    error_ids = _validate_error_findings(diagnosis["error_findings"])
+    if classification == "FAILED" and not error_ids:
+        raise ValueError("FAILED diagnostic reports must contain at least one error")
+    return error_ids
 
 
 def _validate_proposed_changes(
     value: Any,
     *,
     execution_classification: str,
+    error_ids: set[str],
     allowed_components: Iterable[str] | None,
     allowed_targets: Iterable[str] | None,
 ) -> None:
@@ -378,11 +362,53 @@ def _validate_proposed_changes(
                 + ", ".join(sorted(targets))
             )
         _require_priority(change["priority"], f"{path}.priority")
-        for field in PROPOSED_CHANGE_FIELDS:
-            if field != "priority":
-                _require_string(change[field], f"{path}.{field}", allow_empty=False)
+        for field in ("component", "target"):
+            _require_string(change[field], f"{path}.{field}", allow_empty=False)
         for field in ("title", "problem", "implementation", "expected_impact"):
             _require_chinese_text(change[field], f"{path}.{field}")
+        _require_string_array(
+            change["error_refs"], f"{path}.error_refs", non_empty=True
+        )
+        unknown_refs = sorted(set(change["error_refs"]) - error_ids)
+        if unknown_refs:
+            raise ValueError(
+                f"model diagnostic report {path}.error_refs references unknown error ids: "
+                + ", ".join(unknown_refs)
+            )
+        _require_string_array(
+            change["acceptance_criteria"],
+            f"{path}.acceptance_criteria",
+            non_empty=True,
+            chinese=True,
+        )
+
+
+def _ordered_object(value: dict[str, Any], fields: Iterable[str]) -> dict[str, Any]:
+    return {field: value[field] for field in fields if field in value}
+
+
+def _normalize_order(value: dict[str, Any]) -> dict[str, Any]:
+    summary_fields = (*REPORT_SUMMARY_REQUIRED_FIELDS, *REPORT_SUMMARY_OPTIONAL_FIELDS)
+    summary = _ordered_object(value["report_summary"], summary_fields)
+    diagnosis = _ordered_object(value["diagnosis"], DIAGNOSIS_CANONICAL_FIELDS)
+    normalized_findings = []
+    for diagnostic_error in diagnosis["error_findings"]:
+        ordered = _ordered_object(diagnostic_error, ERROR_FIELDS)
+        ordered["evidence"] = [
+            _ordered_object(item, EVIDENCE_FIELDS) for item in diagnostic_error["evidence"]
+        ]
+        normalized_findings.append(ordered)
+    diagnosis["error_findings"] = normalized_findings
+    changes = [
+        _ordered_object(change, PROPOSED_CHANGE_FIELDS)
+        for change in value["proposed_changes"]
+    ]
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "report_summary": summary,
+        "diagnosis": diagnosis,
+        "proposed_changes": changes,
+    }
 
 
 def normalize_json_report(
@@ -391,7 +417,7 @@ def normalize_json_report(
     allowed_components: Iterable[str] | None = None,
     allowed_targets: Iterable[str] | None = None,
 ) -> str:
-    """Validate an LLM report and return deterministic, pretty UTF-8 JSON."""
+    """Validate a model report and return deterministic, pretty UTF-8 JSON."""
     candidate = report.strip()
     if candidate.startswith("```") and candidate.endswith("```"):
         candidate = "\n".join(candidate.splitlines()[1:-1]).strip()
@@ -410,17 +436,12 @@ def normalize_json_report(
             f"model diagnostic report schema_version must be {REPORT_SCHEMA_VERSION}"
         )
     _validate_report_summary(value["report_summary"])
-    _validate_diagnosis(value["diagnosis"])
+    error_ids = _validate_diagnosis(value["diagnosis"])
     _validate_proposed_changes(
         value["proposed_changes"],
         execution_classification=value["diagnosis"]["execution_classification"],
+        error_ids=error_ids,
         allowed_components=allowed_components,
         allowed_targets=allowed_targets,
     )
-    diagnosis = value["diagnosis"]
-    value["diagnosis"] = {
-        field: diagnosis[field]
-        for field in DIAGNOSIS_CANONICAL_FIELDS
-        if field in diagnosis
-    }
-    return json.dumps(value, ensure_ascii=False, indent=2)
+    return json.dumps(_normalize_order(value), ensure_ascii=False, indent=2)

@@ -3,7 +3,7 @@ name: halo-rlm-agent-driven
 description: >-
   Diagnose OTel/OpenTelemetry JSONL traces locally, with the host agent acting
   as HALOAgent: no external LLM API or extra API key. Includes event-log
-  conversion, HALO-style trace tools, P0-P4 evidence ranking, path-efficiency
+  conversion, HALO-style trace tools, P0-P4 error ranking, path-efficiency
   analysis, and UTF-8 JSON reports. Use for trace-only diagnosis, mixed trace
   directories, tool/LLM/subagent failures, Better Harness or Workspace-Bench
   failures, and harness optimization.
@@ -179,52 +179,75 @@ Identify the root AGENT span first. Classify exactly one:
 Root success proves execution completion, not external correctness. An
 unrelated OK span never proves recovery.
 
-Return one UTF-8 JSON object with schema version 5 and these fields:
+Return one UTF-8 JSON object with schema version 6 and these fields:
 
 ```text
 report_summary
+  task_id
   task
+  trace_ids[]
   expected_output_files[]
+  judge_summary
 diagnosis
   execution_classification
-  task_and_output_files_assessment (conditional)
-    expected_output_files[]
-    actual_output_files[]
-    impact
-    evidence
   primary_failure_mode
-  conclusion
-  evidence_chain[]
-  error_span_inventory[]
-  failure_chronology[]
+  error_findings[]
+    error_id
+    priority
+    category
+    title
+    occurrence_count
+    summary
+    evidence[]
+      source
+      reference
+      tool
+      fact
+      error
+    root_cause
+    recovery_status
+    impact
 proposed_changes[]
+  priority
+  component
+  target
+  title
+  error_refs[]
+  problem
+  implementation
+  acceptance_criteria[]
+  expected_impact
 ```
 
-When prompt Context supplies `task` and `expected_output_files`, copy both
-unchanged into `report_summary`. Omit either field only when its Context value
-is `MISSING`.
+Copy the resolved `task_id` and `task` unchanged from prompt Context, including its explicit
+`MISSING` value when unavailable. Copy `expected_output_files` unchanged when
+supplied and omit it when missing. Include `judge_summary` only when Judge
+context exists.
 
-Use the exact v5 fields emitted by the generated prompt; do not add ad-hoc
-fields. Every evidence item must include all fixed fields, using an empty string
-for an unavailable scalar and `occurrence_count: 1` for one observation. Keep
-`task_and_output_files_assessment` only when evidence shows missing, misplaced,
-misnamed, corrupt, or materially incorrect output. When present, give it exactly
-the four child fields shown above and place it immediately after
-`execution_classification`, before `primary_failure_mode`; omit the whole object
-when output is not a problem. `validate-report` normalizes this canonical order
-for reports whose JSON keys arrive in another order. Aggregate the error
-inventory and use empty arrays when no evidence supports a section.
+Use the exact v6 fields emitted by the generated prompt; do not add ad-hoc
+fields. Group each distinct material problem into one `error_findings` item. Do not
+repeat the same failed spans in a generic tool-failure error and another
+semantic or validation error. Write `primary_failure_mode` as a brief Chinese
+summary of the dominant root cause rather than an id.
 
-Write human-facing values under `diagnosis` and `proposed_changes` in Simplified
-Chinese. This includes conclusions, failure descriptions, recovery and impact
-explanations, inventory categories and summaries, chronology events and
-consequences, assessment explanations, and change titles/problems/
-implementations/impacts. Keep JSON field names, classification enums, P0-P4,
-trace/span ids, timestamps, component/target values, tool and operation names,
-paths, filenames, and raw `arguments`/`result`/`error` evidence unchanged.
+Use `source` values `TRACE`, `TASK`, `JUDGE`, `SOURCE_FILE`, or `OUTPUT_FILE`.
+For `TRACE`, put the real span id in `reference`; for every other source, use the
+rubric reference, path, filename, or source location needed to verify the fact.
+Keep evidence compact: `fact` states what the source proves and `error` preserves
+the raw error text or uses an empty string. Evidence has no id and no priority.
 
-Rank findings and changes with P0-P4 only as relative ordering, without fixed
-severity/category meanings. Never invent findings to fill a priority.
+Write human-facing error and change values in Simplified Chinese. This includes
+`primary_failure_mode`, error titles, summaries, facts, root causes and impacts, plus change titles,
+problems, implementations, acceptance criteria, and expected impacts. Keep JSON
+field names, enums, P0-P4, task/trace/span ids, component/target values, tool
+names, paths, filenames, and raw errors unchanged. Use concise
+`UPPER_SNAKE_CASE` error categories and exactly one recovery status:
+`RECOVERED`, `UNRECOVERED`, `UNPROVEN`, or `NOT_APPLICABLE`.
+
+Rank errors and changes with P0-P4 only as relative ordering, without fixed
+severity meanings. Every change must cite one or more existing `error_refs`
+and give concrete, verifiable `acceptance_criteria`. Never invent errors or
+changes to fill a priority.
 
 For `FAILED`, produce exactly 3-5 actionable changes. For every other execution
 classification, allow 0-5 and use an empty array when no trace-supported change
@@ -249,14 +272,15 @@ Use the manifest's exact `manifest_path`; do not derive another one. Fix the
 report and rerun validation until it exits zero and returns
 `"validation": "complete"`. This single HALO-owned acceptance step enforces:
 
-- schema version 5, exact fields, types, nesting, enums, Chinese narratives,
-  allowed component/target values, and classification-dependent change counts;
+- schema version 6, exact fields, types, nesting, enums, Chinese narratives,
+  error/reference integrity, allowed component/target values, and
+  classification-dependent change counts;
 - one error-free prepared-trace manifest whose source, selected trace, prompt,
   report, and manifest paths exist and bind to the current artifact directory;
 - a prepared trace that is not older than its source and a report that is not
   older than the authoritative prompt;
-- report trace ids, evidence trace/span pairs, inventory sample span ids, and
-  chronology span ids that actually exist in the prepared trace.
+- report trace ids and every `TRACE` evidence reference that actually exist in
+  the prepared trace; all proposed changes must reference report error findings.
 
 Omitting `--manifest` performs schema-only compatibility validation and is not
 sufficient to finish a HALO diagnosis. The complete validator makes no

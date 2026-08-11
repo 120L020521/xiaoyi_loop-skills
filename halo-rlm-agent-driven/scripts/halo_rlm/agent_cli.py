@@ -27,8 +27,13 @@ def _load_object(path: str | None, label: str) -> dict[str, Any]:
 
 def _build_prompt(args: argparse.Namespace) -> dict[str, Any]:
     output = Path(args.output).resolve()
+    task = _load_object(args.task_json, "--task-json")
+    if args.task_id:
+        task["task_id"] = args.task_id
+    elif task and not any(key in task for key in ("task_id", "id", "taskId")):
+        task["task_id"] = Path(args.task_json).resolve().parent.name
     prompt = build_halo_prompt(
-        task=_load_object(args.task_json, "--task-json"),
+        task=task,
         judge_result=_load_object(args.judge_result, "--judge-result"),
         surface_filenames=args.surface or list(DEFAULT_EDITABLE_SURFACES),
         additional_request=args.prompt,
@@ -90,36 +95,26 @@ def _validate_report_references(
         )
 
     diagnosis = report["diagnosis"]
-    for index, item in enumerate(diagnosis["evidence_chain"]):
-        reference = (item["trace_id"], item["span_id"])
-        if reference not in span_pairs:
-            raise ValueError(
-                "HALO report diagnosis.evidence_chain"
-                f"[{index}] references an absent trace/span pair: "
-                f"{reference[0]}/{reference[1]}"
+    for error_index, diagnostic_error in enumerate(diagnosis["error_findings"]):
+        for evidence_index, item in enumerate(diagnostic_error["evidence"]):
+            if item["source"] != "TRACE":
+                continue
+            reference = item["reference"]
+            matching_traces = {
+                trace_id for trace_id, span_id in span_pairs if span_id == reference
+            }
+            path = (
+                f"diagnosis.error_findings[{error_index}].evidence[{evidence_index}]"
             )
-        if item["trace_id"] not in reported_trace_ids:
-            raise ValueError(
-                "HALO report diagnosis.evidence_chain"
-                f"[{index}].trace_id is missing from report_summary.trace_ids: "
-                f"{item['trace_id']}"
-            )
-
-    for index, item in enumerate(diagnosis["error_span_inventory"]):
-        unknown_spans = sorted(set(item["sample_span_ids"]) - span_ids)
-        if unknown_spans:
-            raise ValueError(
-                "HALO report diagnosis.error_span_inventory"
-                f"[{index}] references absent sample span ids: "
-                + ", ".join(unknown_spans)
-            )
-
-    for index, item in enumerate(diagnosis["failure_chronology"]):
-        if item["span_id"] not in span_ids:
-            raise ValueError(
-                "HALO report diagnosis.failure_chronology"
-                f"[{index}] references an absent span id: {item['span_id']}"
-            )
+            if not matching_traces:
+                raise ValueError(
+                    f"HALO report {path} references an absent span id: {reference}"
+                )
+            if not matching_traces.intersection(reported_trace_ids):
+                raise ValueError(
+                    f"HALO report {path} references a span outside "
+                    f"report_summary.trace_ids: {reference}"
+                )
 
 
 def _validate_bundle(
@@ -230,6 +225,11 @@ def _parser() -> argparse.ArgumentParser:
     prompt = subparsers.add_parser("build-prompt", help="Write halo_prompt.txt locally")
     prompt.add_argument("--output", required=True, help="Destination halo_prompt.txt")
     prompt.add_argument("--task-json", default=None, help="Optional task JSON object")
+    prompt.add_argument(
+        "--task-id",
+        default=None,
+        help="Optional task id override; defaults to task JSON metadata or parent folder",
+    )
     prompt.add_argument("--judge-result", default=None, help="Optional Judge JSON object")
     prompt.add_argument("--surface", action="append", default=None)
     prompt.add_argument("-p", "--prompt", default=None, help="Additional diagnostic request")

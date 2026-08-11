@@ -2,9 +2,9 @@
 
 本文说明以下三个项目内 Skill 的职责和组合方式：
 
-- [`run-xiaoyi-loop`](../../run-xiaoyi-loop/SKILL.md)：运行小艺 Task、收集产物并使用独立 Agent Judge 评分。
-- [`halo-rlm-agent-driven`](../../halo-rlm-agent-driven/SKILL.md)：诊断单个或一组 OTel/JSONL Trace，生成严格的 HALO JSON 报告。
-- [`run-xiaoyi-halo-loop`](../../run-xiaoyi-halo-loop/SKILL.md)：薄编排层，串联 Runner、Agent Judge 和每 Task 独立 HALO 诊断。
+- [`run-xiaoyi-loop`]：运行小艺 Task、收集产物并使用独立 Agent Judge 评分。
+- [`halo-rlm-agent-driven`]：诊断单个或一组 OTel/JSONL Trace，生成严格的 HALO JSON 报告。
+- [`run-xiaoyi-halo-loop`]：薄编排层，串联 Runner、Agent Judge 和每 Task 独立 HALO 诊断。
 
 ## 如何选择
 
@@ -301,7 +301,7 @@ task                  ← task 或 description
 expected_output_files ← output_files 或 expected_output_files
 ```
 
-每个 Trace 只能构建一次 Prompt。诊断必须使用该 Prompt，生成 schema-v5 UTF-8
+每个 Trace 只能构建一次 Prompt。诊断必须使用该 Prompt，生成 schema-v6 UTF-8
 JSON 报告，并反复执行以下校验直到成功：
 
 ```powershell
@@ -309,7 +309,7 @@ python -m halo_rlm.agent_cli validate-report "<manifest.report_path>" `
   --manifest "<manifest.manifest_path>"
 ```
 
-校验成功时必须返回 `validation=complete`。HALO 在同一入口中完成 schema-v5
+校验成功时必须返回 `validation=complete`。HALO 在同一入口中完成 schema-v6
 结构、manifest 路径绑定、产物新鲜度以及报告 Trace/Span 引用真实性校验；只诊断
 而不经过批量编排时也执行相同的完整校验。
 
@@ -318,6 +318,96 @@ python -m halo_rlm.agent_cli validate-report "<manifest.report_path>" `
 
 `diagnosis` 和 `proposed_changes` 下的人类可读内容使用简体中文，JSON 字段名、枚举、
 ID、时间戳、路径和原始证据保持原样。
+
+### HALO 报告结构（schema v6）
+
+`halo_report.json` 顶层固定为四个字段：
+
+```text
+schema_version
+report_summary
+diagnosis
+proposed_changes
+```
+
+- `report_summary`：保存 Task、Trace 和可选 Judge 上下文；`expected_output_files` 只在这里出现。
+- `diagnosis.execution_classification`：执行结论，可取 `FAILED`、
+  `SUCCEEDED_WITH_RECOVERED_ERRORS`、`SUCCEEDED_WITH_UNPROVEN_RECOVERY`、
+  `SUCCEEDED_CLEANLY` 或 `UNKNOWN`。
+- `diagnosis.primary_failure_mode`：用中文简述最主要的失败根因，不只写错误 ID。
+- `diagnosis.error_findings`：按根因聚合后的错误诊断列表，使用 `ERR1`、`ERR2` 等稳定 ID。
+- `proposed_changes`：针对错误提出可实施、可验收的改进建议。
+
+完整字段关系如下：
+
+```text
+report_summary
+  task_id
+  task
+  trace_ids[]
+  expected_output_files[]  # 可选
+  judge_summary            # 可选
+diagnosis
+  execution_classification
+  primary_failure_mode
+  error_findings[]
+    error_id
+    priority
+    category
+    title
+    occurrence_count
+    summary
+    evidence[]
+      source
+      reference
+      tool
+      fact
+      error
+    root_cause
+    recovery_status
+    impact
+proposed_changes[]
+  priority
+  component
+  target
+  title
+  error_refs[]
+  problem
+  implementation
+  acceptance_criteria[]
+  expected_impact
+```
+
+`error_refs` 只负责把建议关联到 `diagnosis.error_findings[].error_id`；它不是建议的全部内容。
+每条建议还必须说明修改对象、问题、实现方案、验收标准和预期收益，例如：
+
+```json
+{
+  "priority": "P0",
+  "component": "new_tool",
+  "target": "workspace_bench_tools.ts",
+  "title": "增加结构化 Excel 读取工具",
+  "error_refs": [
+    "ERR2"
+  ],
+  "problem": "硬编码单元格范围导致读取错误数据列。",
+  "implementation": "根据工作表表头和语义名称定位数据列，并在生成图表后重新验证引用范围。",
+  "acceptance_criteria": [
+    "数据列必须通过表头名称匹配",
+    "图表保存后必须重新读取引用区域"
+  ],
+  "expected_impact": "避免从错误列提取数据。"
+}
+```
+
+错误和建议使用 `P0` 至 `P4` 表示报告内的相对优先顺序；Evidence 不设置优先级或独立
+ID，通过 `source` 和 `reference` 定位。`source` 可取 `TRACE`、`TASK`、`JUDGE`、
+`SOURCE_FILE` 或 `OUTPUT_FILE`；`recovery_status` 可取 `RECOVERED`、`UNRECOVERED`、
+`UNPROVEN` 或 `NOT_APPLICABLE`。
+
+报告不包含 `task_and_output_files_assessment`。无证据支持的错误或建议使用空数组，不得
+臆造；`FAILED` 报告必须提供 3 至 5 条建议，其他执行分类允许 0 至 5 条。每条建议的
+`error_refs` 必须引用报告中真实存在的错误 ID。
 
 ## 3. 使用 run-xiaoyi-halo-loop
 

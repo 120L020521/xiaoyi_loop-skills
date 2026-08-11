@@ -77,8 +77,8 @@ def section(title: str) -> None:
 
 def _valid_report_summary() -> dict:
     return {
-        "title": "HALO RLM DIAGNOSTIC REPORT",
-        "protocol": "HALO RLM agent-driven",
+        "task_id": "task-test",
+        "task": "测试任务内容",
         "trace_ids": ["trace-1"],
     }
 
@@ -89,30 +89,40 @@ def _valid_change(
     priority: str = "P0",
 ) -> dict:
     return {
-        "component": component,
         "priority": priority,
+        "component": component,
+        "target": target,
         "title": "测试修改",
+        "error_refs": ["ERR1"],
         "problem": "测试问题说明",
         "implementation": "测试实施方案",
+        "acceptance_criteria": ["相同输入必须通过验证。"],
         "expected_impact": "测试预期影响",
-        "target": target,
     }
 
 
 def _valid_evidence() -> dict:
     return {
-        "priority": "P0",
-        "trace_id": "trace-1",
-        "span_id": "span-1",
-        "timestamp": "2026-01-01T00:00:00Z",
-        "operation": "test operation",
-        "tool_name": "test_tool",
-        "arguments": "{}",
-        "result": "",
+        "source": "TRACE",
+        "reference": "span-1",
+        "tool": "test_tool",
+        "fact": "测试工具调用发生错误。",
         "error": "test error",
-        "recovery": "",
-        "impact": "测试影响说明",
+    }
+
+
+def _valid_error() -> dict:
+    return {
+        "error_id": "ERR1",
+        "priority": "P0",
+        "category": "TOOL_FAILURE",
+        "title": "测试工具失败",
         "occurrence_count": 1,
+        "summary": "测试工具调用没有成功完成。",
+        "evidence": [_valid_evidence()],
+        "root_cause": "测试工具参数与运行环境不兼容。",
+        "recovery_status": "UNRECOVERED",
+        "impact": "测试任务无法完成预期操作。",
     }
 
 
@@ -618,11 +628,10 @@ def test_mock_demo_engine(store: TraceStore) -> None:
         "mock report satisfies the strict Chinese narrative contract",
     )
     check(
-        "evidence_chain" in report_obj["diagnosis"]
-        and "error_span_inventory" in report_obj["diagnosis"]
-        and "failure_chronology" in report_obj["diagnosis"]
-        and "evidence_chain" not in report_obj,
-        "diagnostic detail sections are nested under diagnosis",
+        "error_findings" in report_obj["diagnosis"]
+        and "primary_failure_mode" in report_obj["diagnosis"]
+        and "errors" not in report_obj,
+        "error findings are nested under diagnosis",
     )
 
     agent_starts = [e for e in events if e["type"] == "agent_start"]
@@ -697,9 +706,8 @@ def test_trace_only_outcome_prompt() -> None:
     check(
         f'"schema_version":{REPORT_SCHEMA_VERSION}' in prompt
         and '"diagnosis"' in prompt
-        and '"evidence_chain"' in prompt
-        and '"error_span_inventory"' in prompt
-        and '"failure_chronology"' in prompt
+        and '"primary_failure_mode"' in prompt
+        and '"error_findings"' in prompt
         and '"proposed_changes"' in prompt,
         "trace-only prompt includes the requested sectioned JSON report contract",
     )
@@ -709,8 +717,9 @@ def test_trace_only_outcome_prompt() -> None:
     )
     check(
         "judge.score: MISSING (not supplied; trace-only context)" in prompt
+        and "task_id: MISSING (not supplied; trace-only context)" in prompt
         and "editable_surfaces: runner_skill.md, workspace_bench_tools.ts" in prompt
-        and "predefined issue categories or severity meanings" in prompt,
+        and "UPPER_SNAKE_CASE category" in prompt,
         "trace-only prompt marks missing context and uses unified constraints",
     )
     check(
@@ -734,7 +743,7 @@ def test_max_turns() -> None:
 
 
 def test_better_harness_component_validation() -> None:
-    section("Unified report component and target validation")
+    section("Unified v6 error and change validation")
 
     def expect_error(candidate: dict, expected: str, label: str) -> None:
         try:
@@ -758,22 +767,22 @@ def test_better_harness_component_validation() -> None:
         "strict report example does not solicit uncontracted metadata",
     )
     check(
-        '"task":"..."' in report_example
-        and '"expected_output_files":["..."]' in report_example
-        and "copy both unchanged into report_summary" in REPORT_STRUCTURE_GUIDANCE,
-        "report example preserves supplied task and expected output files",
+        '"task_id":"task15"' in report_example
+        and '"expected_output_files":["output.xlsx"]' in report_example
+        and "Copy the resolved task_id and task from Context" in REPORT_STRUCTURE_GUIDANCE,
+        "report example preserves task identity and expected output files",
     )
     check(
-        "immediately after execution_classification and before primary_failure_mode"
-        in REPORT_STRUCTURE_GUIDANCE,
-        "report guidance fixes the conditional assessment position",
+        '"error_findings"' in report_example
+        and '"error_refs"' in report_example
+        and '"acceptance_criteria"' in report_example,
+        "report example uses error-finding-centered v6 structure",
     )
     report = build_report(
         report_summary=_valid_report_summary(),
         execution_classification="UNKNOWN",
-        primary_failure_mode="测试失败模式",
-        conclusion="测试诊断结论",
-        evidence_chain=[_valid_evidence()],
+        primary_failure_mode="测试工具参数与运行环境不兼容。",
+        error_findings=[_valid_error()],
         proposed_changes=[
             _valid_change(),
             _valid_change("tool_impl", "workspace_bench_tools.ts", "P1"),
@@ -784,6 +793,14 @@ def test_better_harness_component_validation() -> None:
         json.dumps(report),
         allowed_components=BETTER_HARNESS_COMPONENTS,
         allowed_targets=DEFAULT_EDITABLE_SURFACES,
+    )
+    check(
+        list(json.loads(valid)["diagnosis"]) == [
+            "execution_classification",
+            "primary_failure_mode",
+            "error_findings",
+        ],
+        "strict validator normalizes the requested diagnosis field order",
     )
     check(
         bool(json.loads(valid)),
@@ -817,34 +834,6 @@ def test_better_harness_component_validation() -> None:
         _valid_change("tool_impl", "workspace_bench_tools.ts", "P1"),
         _valid_change("tool_definition", "workspace_bench_tools.ts", "P2"),
     ]
-    report["diagnosis"]["task_and_output_files_assessment"] = {
-        "expected_output_files": ["expected.txt"],
-        "actual_output_files": ["actual.txt"],
-        "impact": "缺少要求的输出文件。",
-        "evidence": "写入 span 仅创建了 actual.txt。",
-    }
-    normalized_assessment_report = json.loads(normalize_json_report(
-        json.dumps(report),
-        allowed_components=BETTER_HARNESS_COMPONENTS,
-        allowed_targets=DEFAULT_EDITABLE_SURFACES,
-    ))
-    diagnosis_keys = list(normalized_assessment_report["diagnosis"])
-    check(
-        diagnosis_keys[:3] == [
-            "execution_classification",
-            "task_and_output_files_assessment",
-            "primary_failure_mode",
-        ],
-        "strict validator normalizes the conditional output assessment position",
-    )
-
-    malformed = json.loads(json.dumps(report))
-    malformed["diagnosis"]["task_and_output_files_assessment"]["status"] = "failed"
-    expect_error(
-        malformed,
-        "has unsupported fields: status",
-        "strict validator rejects ad-hoc conditional assessment fields",
-    )
 
     malformed = json.loads(json.dumps(report))
     malformed["diagnosis"]["execution_classification"] = "SUCCESS"
@@ -855,7 +844,7 @@ def test_better_harness_component_validation() -> None:
     )
 
     malformed = json.loads(json.dumps(report))
-    malformed["diagnosis"]["conclusion"] = "English-only conclusion"
+    malformed["diagnosis"]["error_findings"][0]["summary"] = "English-only summary"
     expect_error(
         malformed,
         "must contain Simplified Chinese narrative text",
@@ -863,11 +852,35 @@ def test_better_harness_component_validation() -> None:
     )
 
     malformed = json.loads(json.dumps(report))
-    del malformed["diagnosis"]["evidence_chain"][0]["occurrence_count"]
+    malformed["diagnosis"]["primary_failure_mode"] = "English-only root cause"
     expect_error(
         malformed,
-        "missing fields: occurrence_count",
+        "must contain Simplified Chinese narrative text",
+        "strict validator requires a Chinese primary failure mode",
+    )
+
+    malformed = json.loads(json.dumps(report))
+    del malformed["diagnosis"]["error_findings"][0]["evidence"][0]["error"]
+    expect_error(
+        malformed,
+        "missing fields: error",
         "strict validator rejects incomplete evidence items",
+    )
+
+    malformed = json.loads(json.dumps(report))
+    malformed["proposed_changes"][0]["error_refs"] = ["ERR99"]
+    expect_error(
+        malformed,
+        "error_refs references unknown error ids",
+        "strict validator binds every change to existing error findings",
+    )
+
+    malformed = json.loads(json.dumps(report))
+    malformed["diagnosis"]["error_findings"][0]["evidence"][0]["source"] = "LOG"
+    expect_error(
+        malformed,
+        "source must be one of",
+        "strict validator rejects an unknown evidence source",
     )
 
     malformed = json.loads(json.dumps(report))
@@ -888,7 +901,7 @@ def test_agent_cli() -> None:
     prompt_path = os.path.join(agent_dir, "halo_prompt.txt")
     report_path = os.path.join(agent_dir, "halo_report.json")
     with open(task_path, "w", encoding="utf-8") as f:
-        json.dump({"task": "Create result.txt", "output_files": ["result.txt"]}, f)
+        json.dump({"id": 15, "task": "Create result.txt", "output_files": ["result.txt"]}, f)
     with open(judge_path, "w", encoding="utf-8") as f:
         json.dump({"passed": False, "score": 0.25, "feedback": "incomplete"}, f)
 
@@ -920,18 +933,18 @@ def test_agent_cli() -> None:
         prompt = f.read()
     check(
         "judge.score: 0.25" in prompt
+        and "task_id: task15" in prompt
         and "task: Create result.txt" in prompt
         and 'expected_output_files: ["result.txt"]' in prompt
-        and '"expected_output_files":["..."]' in prompt,
-        "agent prompt builder injects task/output context and requires both in reports",
+        and '"expected_output_files":["output.xlsx"]' in prompt,
+        "agent prompt builder injects task identity and output context",
     )
 
     report = build_report(
         report_summary=_valid_report_summary(),
         execution_classification="UNKNOWN",
-        primary_failure_mode="测试失败模式",
-        conclusion="测试诊断结论",
-        evidence_chain=[_valid_evidence()],
+        primary_failure_mode="测试工具参数与运行环境不兼容。",
+        error_findings=[_valid_error()],
         proposed_changes=[
             _valid_change(),
             _valid_change("tool_impl", "workspace_bench_tools.ts", "P1"),

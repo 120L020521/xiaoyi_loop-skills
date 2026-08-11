@@ -19,6 +19,14 @@ DEFAULT_EDITABLE_SURFACES = ("runner_skill.md", "workspace_bench_tools.ts")
 MISSING_CONTEXT = "MISSING (not supplied; trace-only context)"
 
 
+def _resolve_task_id(task: dict) -> str:
+    value = task.get("task_id") or task.get("id") or task.get("taskId")
+    if value is None or value == "":
+        return MISSING_CONTEXT
+    text = str(value)
+    return f"task{text}" if text.isdigit() else text
+
+
 def _format_rubrics(judge_result: dict) -> str:
     rubrics = judge_result.get("rubrics") or []
     if not rubrics:
@@ -46,6 +54,7 @@ def build_halo_prompt(
     additional_request: str | None = None,
 ) -> str:
     """Build the unified HALO prompt; task and judge context may be absent."""
+    task_id = _resolve_task_id(task)
     description = task.get("task") or task.get("description") or MISSING_CONTEXT
     output_files = task.get("output_files") or task.get("expected_output_files")
     output_text = (
@@ -65,6 +74,7 @@ def build_halo_prompt(
         "arguments, result/error, timestamp, and occurrence count when material.",
         "",
         "## Context",
+        f"task_id: {task_id}",
         f"task: {description}",
         f"expected_output_files: {output_text}",
         f"judge.passed: {judge_value('passed')}",
@@ -78,8 +88,9 @@ def build_halo_prompt(
         "  Never propose rubric access/auditing or runner-core/unlisted-surface changes.",
         "- Treat supplied task, judge, and rubric data as evaluator context only; ground",
         "  behavior claims in spans and do not infer a cause from a score or missing context.",
-        "- When task and expected_output_files are supplied, copy both unchanged into",
-        "  report_summary; omit either only when its Context value is MISSING.",
+        "- Copy task_id and task unchanged into report_summary, including the explicit",
+        "  MISSING value when unavailable. Copy expected_output_files unchanged when",
+        "  supplied and omit it only when its Context value is MISSING.",
         "- Without task/Judge context, report execution evidence only, not external correctness.",
         "- Prefer trace-proven tool changes; use prompt changes only when tools cannot fix it.",
         "",
@@ -94,7 +105,11 @@ def build_halo_prompt(
         "   direction changes, ineffective retries, late stopping, and safe early termination.",
         "   Distinguish necessary verification from redundancy; outcome alone proves neither.",
         "8. Prompt issues, only after ruling out tool-level causes.",
-        "Report frequencies and span-level evidence for each material pattern.",
+        "Group each distinct material problem into one error. Report its frequency,",
+        "root cause, impact, recovery status, and compact source/reference evidence.",
+        "Do not duplicate the same failed calls in both a generic tool-failure error",
+        "and a second semantic or validation error. Briefly summarize the dominant root",
+        "cause in primary_failure_mode.",
         "",
         "## Outcome and changes",
         "- Identify the root AGENT span. Classify as FAILED,",
@@ -107,14 +122,15 @@ def build_halo_prompt(
         "  change is warranted. Allowed components: "
         + ", ".join(BETTER_HARNESS_COMPONENTS)
         + ".",
-        "- Every change needs one allowed component, P0-P4 priority, and one editable target.",
+        "- Every error and change needs one P0-P4 relative priority. Evidence has no",
+        "  priority. Every change also needs one allowed component, one editable target,",
+        "  error_refs, and concrete acceptance_criteria.",
         "- Feed trace-supported trajectory inefficiencies into `proposed_changes` only when",
         "  material and actionable; quantify expected call/retry/turn/time reduction when",
         "  supported. Do not force an efficiency proposal without evidence.",
-        "- Use P0-P4 only as machine-readable relative ranking labels. Do not assign",
-        "  predefined issue categories or severity meanings; let the model rank by evidence",
-        "  and impact, consistently across findings and changes.",
-        "- Never invent findings or metadata to fill a section.",
+        "- Use P0-P4 only as machine-readable relative ranking labels without predefined",
+        "  severity meanings. Use a concise UPPER_SNAKE_CASE category for each error.",
+        "- Never invent errors or metadata to fill a section.",
     ]
     if additional_request:
         parts.extend(["", "## Additional diagnostic request", additional_request])
