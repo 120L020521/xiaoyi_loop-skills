@@ -1,0 +1,899 @@
+<div id="halo-diagnosis-demo">
+  <style>
+    #halo-diagnosis-demo {
+      color-scheme: light dark;
+      --halo-page: light-dark(#f4f6fb, #11141b);
+      --halo-surface: light-dark(#ffffff, #191e28);
+      --halo-surface-soft: light-dark(#f8f9fc, #202632);
+      --halo-text: light-dark(#182033, #edf1f8);
+      --halo-muted: light-dark(#657089, #a6afc1);
+      --halo-border: light-dark(#dfe4ee, #313949);
+      --halo-blue: light-dark(#3568d4, #7da4ff);
+      --halo-blue-soft: light-dark(#eaf0ff, #202c49);
+      --halo-red: light-dark(#c33f4d, #ff7f8a);
+      --halo-red-soft: light-dark(#fff0f1, #43252c);
+      --halo-orange: light-dark(#b85b18, #ffac65);
+      --halo-orange-soft: light-dark(#fff4e9, #3f2d20);
+      --halo-yellow: light-dark(#956d08, #f4ce62);
+      --halo-yellow-soft: light-dark(#fff9dc, #3b351d);
+      --halo-green: light-dark(#237957, #62d6a5);
+      --halo-green-soft: light-dark(#eaf8f1, #1e3a31);
+      --halo-purple: light-dark(#7354ba, #b8a0ff);
+      --halo-purple-soft: light-dark(#f3efff, #302943);
+      color: var(--halo-text);
+      width: 100%;
+    }
+    #halo-diagnosis-demo * { box-sizing: border-box; }
+    #halo-diagnosis-demo .halo-app {
+      background: var(--halo-page);
+      border: 1px solid var(--halo-border);
+      border-radius: 18px;
+      overflow: visible;
+      width: 100%;
+    }
+    #halo-diagnosis-demo .halo-top {
+      background: linear-gradient(135deg, var(--halo-surface) 0%, var(--halo-blue-soft) 100%);
+      border-radius: 17px 17px 0 0;
+      padding: 22px 24px 18px;
+    }
+    #halo-diagnosis-demo .halo-title-line,
+    #halo-diagnosis-demo .halo-task-summary,
+    #halo-diagnosis-demo .halo-task-main,
+    #halo-diagnosis-demo .halo-task-meta,
+    #halo-diagnosis-demo .halo-finding-head,
+    #halo-diagnosis-demo .halo-change-head,
+    #halo-diagnosis-demo .halo-evidence-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #halo-diagnosis-demo .halo-title-line { justify-content: space-between; }
+    #halo-diagnosis-demo h1,
+    #halo-diagnosis-demo h2,
+    #halo-diagnosis-demo h3,
+    #halo-diagnosis-demo p { margin: 0; }
+    #halo-diagnosis-demo h1 { font-size: 22px; font-weight: 500; }
+    #halo-diagnosis-demo h2 { font-size: 17px; font-weight: 500; }
+    #halo-diagnosis-demo h3 { font-size: 15px; font-weight: 500; }
+    #halo-diagnosis-demo .halo-kicker,
+    #halo-diagnosis-demo .halo-muted,
+    #halo-diagnosis-demo .halo-count-label,
+    #halo-diagnosis-demo .halo-field-label {
+      color: var(--halo-muted);
+    }
+    #halo-diagnosis-demo .halo-kicker { margin-top: 5px; }
+    #halo-diagnosis-demo .halo-filter-dock {
+      background: color-mix(in srgb, var(--halo-surface) 96%, transparent);
+      border-bottom: 1px solid var(--halo-border);
+      border-top: 1px solid var(--halo-border);
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--halo-text) 8%, transparent);
+      padding: 11px 24px 12px;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    #halo-diagnosis-demo .halo-filter-toggle {
+      background: transparent;
+      border: 0;
+      color: var(--halo-text);
+      cursor: pointer;
+      display: none;
+      padding: 2px 0;
+      text-align: left;
+      width: 100%;
+    }
+    #halo-diagnosis-demo .halo-filter-bar {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    #halo-diagnosis-demo .halo-filter {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    #halo-diagnosis-demo .halo-filter label {
+      color: var(--halo-muted);
+      font-size: 12px;
+    }
+    #halo-diagnosis-demo select {
+      appearance: none;
+      background-color: var(--halo-surface);
+      background-image: linear-gradient(45deg, transparent 50%, var(--halo-muted) 50%), linear-gradient(135deg, var(--halo-muted) 50%, transparent 50%);
+      background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+      background-repeat: no-repeat;
+      background-size: 5px 5px, 5px 5px;
+      border: 1px solid var(--halo-border);
+      border-radius: 9px;
+      color: var(--halo-text);
+      font: inherit;
+      min-width: 0;
+      padding: 9px 28px 9px 10px;
+      width: 100%;
+    }
+    #halo-diagnosis-demo select:focus-visible,
+    #halo-diagnosis-demo button:focus-visible,
+    #halo-diagnosis-demo summary:focus-visible {
+      outline: 2px solid var(--halo-blue);
+      outline-offset: 2px;
+    }
+    #halo-diagnosis-demo .halo-body { padding: 18px 24px 24px; }
+    #halo-diagnosis-demo .halo-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    #halo-diagnosis-demo .halo-stat {
+      background: var(--halo-surface);
+      border: 1px solid var(--halo-border);
+      border-radius: 12px;
+      display: grid;
+      gap: 3px;
+      padding: 12px 14px;
+    }
+    #halo-diagnosis-demo .halo-stat strong {
+      font-size: 22px;
+      font-weight: 500;
+    }
+    #halo-diagnosis-demo .halo-legend {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    #halo-diagnosis-demo .halo-dot {
+      border-radius: 50%;
+      display: inline-block;
+      flex: 0 0 auto;
+      height: 9px;
+      width: 9px;
+    }
+    #halo-diagnosis-demo .halo-p0 { background: var(--halo-red); }
+    #halo-diagnosis-demo .halo-p1 { background: var(--halo-orange); }
+    #halo-diagnosis-demo .halo-p2 { background: var(--halo-yellow); }
+    #halo-diagnosis-demo .halo-p3 { background: var(--halo-blue); }
+    #halo-diagnosis-demo .halo-p4 { background: var(--halo-purple); }
+    #halo-diagnosis-demo .halo-ok { background: var(--halo-green); }
+    #halo-diagnosis-demo .halo-unknown { background: var(--halo-yellow); }
+    #halo-diagnosis-demo .halo-task-list { display: grid; gap: 12px; }
+    #halo-diagnosis-demo .halo-report-layout {
+      align-items: start;
+      display: grid;
+      gap: 14px;
+      grid-template-columns: 170px minmax(0, 1fr);
+    }
+    #halo-diagnosis-demo .halo-task-nav {
+      background: var(--halo-surface);
+      border: 1px solid var(--halo-border);
+      border-radius: 12px;
+      max-height: 440px;
+      overflow: auto;
+      padding: 10px;
+      position: sticky;
+      top: 96px;
+    }
+    #halo-diagnosis-demo .halo-task-nav h2 {
+      font-size: 13px;
+      margin: 0 0 8px;
+    }
+    #halo-diagnosis-demo .halo-task-nav-list { display: grid; gap: 4px; }
+    #halo-diagnosis-demo .halo-nav-link {
+      border-radius: 7px;
+      color: var(--halo-muted);
+      display: block;
+      font-size: 13px;
+      overflow: hidden;
+      padding: 7px 8px;
+      text-decoration: none;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #halo-diagnosis-demo .halo-nav-link:hover {
+      background: var(--halo-surface-soft);
+      color: var(--halo-text);
+    }
+    #halo-diagnosis-demo .halo-report-main { min-width: 0; }
+    #halo-diagnosis-demo .halo-task {
+      position: relative;
+      scroll-margin-top: 104px;
+      background: var(--halo-surface);
+      border: 1px solid var(--halo-border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    #halo-diagnosis-demo .halo-task::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 5px;
+      border-radius: 14px 0 0 14px;
+      pointer-events: none;
+      z-index: 1;
+    }
+    #halo-diagnosis-demo .halo-task.halo-task-color-0::before { background: var(--halo-blue); }
+    #halo-diagnosis-demo .halo-task.halo-task-color-1::before { background: var(--halo-orange); }
+    #halo-diagnosis-demo .halo-task.halo-task-color-2::before { background: var(--halo-purple); }
+    #halo-diagnosis-demo .halo-task.halo-task-color-3::before { background: var(--halo-green); }
+    #halo-diagnosis-demo .halo-task.halo-task-color-4::before { background: var(--halo-red); }
+    #halo-diagnosis-demo .halo-task.halo-task-color-5::before { background: var(--halo-yellow); }
+    #halo-diagnosis-demo .halo-task-toggle {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 16px 18px;
+      text-align: left;
+      width: 100%;
+    }
+    #halo-diagnosis-demo .halo-task-toggle:hover { background: var(--halo-surface-soft); }
+    #halo-diagnosis-demo .halo-task-main { min-width: 0; }
+    #halo-diagnosis-demo .halo-task-id { font-size: 18px; font-weight: 500; white-space: nowrap; }
+    #halo-diagnosis-demo .halo-task-name {
+      color: var(--halo-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #halo-diagnosis-demo .halo-task-meta { justify-content: flex-end; }
+    #halo-diagnosis-demo .halo-chevron {
+      color: var(--halo-muted);
+      display: inline-block;
+      transition: transform 160ms ease;
+    }
+    #halo-diagnosis-demo .halo-task.is-open .halo-chevron { transform: rotate(90deg); }
+    #halo-diagnosis-demo .halo-chip {
+      align-items: center;
+      background: var(--halo-surface-soft);
+      border-radius: 999px;
+      color: var(--halo-muted);
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px 8px;
+      white-space: nowrap;
+    }
+    #halo-diagnosis-demo .halo-chip.failed { background: var(--halo-red-soft); color: var(--halo-red); }
+    #halo-diagnosis-demo .halo-chip.passed { background: var(--halo-green-soft); color: var(--halo-green); }
+    #halo-diagnosis-demo .halo-chip.missing { background: var(--halo-yellow-soft); color: var(--halo-yellow); }
+    #halo-diagnosis-demo .halo-task-detail {
+      border-top: 1px solid var(--halo-border);
+      display: none;
+      padding: 18px;
+    }
+    #halo-diagnosis-demo .halo-task.is-open .halo-task-detail { display: block; }
+    #halo-diagnosis-demo .halo-primary {
+      background: var(--halo-blue-soft);
+      border-radius: 11px;
+      display: grid;
+      gap: 5px;
+      padding: 12px 14px;
+    }
+    #halo-diagnosis-demo .halo-section { margin-top: 18px; }
+    #halo-diagnosis-demo .halo-section-title {
+      align-items: baseline;
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    #halo-diagnosis-demo .halo-rubrics {
+      display: grid;
+      gap: 7px;
+    }
+    #halo-diagnosis-demo .halo-rubric {
+      align-items: start;
+      display: grid;
+      gap: 4px;
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    #halo-diagnosis-demo .halo-rubric-mark {
+      background: var(--halo-red-soft);
+      border-radius: 6px;
+      color: var(--halo-red);
+      font-weight: 500;
+      padding: 2px 6px;
+    }
+    #halo-diagnosis-demo .halo-finding {
+      background: var(--halo-surface-soft);
+      border-radius: 12px;
+      display: grid;
+      gap: 11px;
+      padding: 14px;
+    }
+    #halo-diagnosis-demo .halo-finding-head { justify-content: space-between; }
+    #halo-diagnosis-demo .halo-finding-title {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      min-width: 0;
+    }
+    #halo-diagnosis-demo .halo-priority {
+      border-radius: 6px;
+      font-weight: 500;
+      padding: 3px 7px;
+    }
+    #halo-diagnosis-demo .halo-priority.p0 { background: var(--halo-red); color: light-dark(#ffffff, #201013); }
+    #halo-diagnosis-demo .halo-priority.p1 { background: var(--halo-orange); color: light-dark(#ffffff, #21150c); }
+    #halo-diagnosis-demo .halo-priority.p2 { background: var(--halo-yellow); color: light-dark(#ffffff, #211d08); }
+    #halo-diagnosis-demo .halo-priority.p3 { background: var(--halo-blue); color: light-dark(#ffffff, #0c1630); }
+    #halo-diagnosis-demo .halo-priority.p4 { background: var(--halo-purple); color: light-dark(#ffffff, #171126); }
+    #halo-diagnosis-demo .halo-finding-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    #halo-diagnosis-demo .halo-field { display: grid; gap: 3px; }
+    #halo-diagnosis-demo .halo-evidence-toggle {
+      background: transparent;
+      color: var(--halo-text);
+    }
+    #halo-diagnosis-demo .halo-evidence-toggle summary {
+      cursor: pointer;
+      font-weight: 500;
+    }
+    #halo-diagnosis-demo .halo-evidence-list {
+      display: grid;
+      gap: 7px;
+      margin-top: 8px;
+    }
+    #halo-diagnosis-demo .halo-evidence {
+      background: color-mix(in srgb, var(--halo-surface) 72%, transparent);
+      border-radius: 8px;
+      display: grid;
+      gap: 4px;
+      padding: 9px 10px;
+    }
+    #halo-diagnosis-demo .halo-evidence-head { justify-content: space-between; }
+    #halo-diagnosis-demo code {
+      color: inherit;
+      overflow-wrap: anywhere;
+    }
+    #halo-diagnosis-demo .halo-change {
+      background: var(--halo-surface);
+      border: 1px solid color-mix(in srgb, var(--halo-border) 75%, transparent);
+      border-radius: 9px;
+      display: grid;
+      gap: 7px;
+      padding: 10px 11px;
+    }
+    #halo-diagnosis-demo .halo-change.p0 { border-left: 4px solid var(--halo-red); }
+    #halo-diagnosis-demo .halo-change.p1 { border-left: 4px solid var(--halo-orange); }
+    #halo-diagnosis-demo .halo-change.p2 { border-left: 4px solid var(--halo-yellow); }
+    #halo-diagnosis-demo .halo-change.p3 { border-left: 4px solid var(--halo-blue); }
+    #halo-diagnosis-demo .halo-change.p4 { border-left: 4px solid var(--halo-purple); }
+    #halo-diagnosis-demo .halo-change-head { justify-content: space-between; }
+    #halo-diagnosis-demo .halo-change-meta { color: var(--halo-muted); }
+    #halo-diagnosis-demo .halo-change ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    #halo-diagnosis-demo .halo-diagnosis-grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+      align-items: start;
+    }
+    #halo-diagnosis-demo .halo-diagnosis-column {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    #halo-diagnosis-demo .halo-column-heading {
+      align-items: baseline;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+    #halo-diagnosis-demo .halo-problem-list,
+    #halo-diagnosis-demo .halo-suggestion-list {
+      display: grid;
+      gap: 10px;
+    }
+    #halo-diagnosis-demo .halo-empty {
+      color: var(--halo-muted);
+      padding: 30px 10px;
+      text-align: center;
+    }
+    #halo-diagnosis-demo .halo-hidden { display: none !important; }
+    @media (max-width: 920px) {
+      #halo-diagnosis-demo .halo-filter-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      #halo-diagnosis-demo .halo-report-layout { grid-template-columns: 1fr; }
+      #halo-diagnosis-demo .halo-task-nav { max-height: none; position: static; }
+      #halo-diagnosis-demo .halo-task-nav-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      #halo-diagnosis-demo .halo-diagnosis-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      #halo-diagnosis-demo .halo-top,
+      #halo-diagnosis-demo .halo-body,
+      #halo-diagnosis-demo .halo-filter-dock { padding-left: 14px; padding-right: 14px; }
+      #halo-diagnosis-demo .halo-filter-toggle { display: block; }
+      #halo-diagnosis-demo .halo-filter-dock.is-collapsed .halo-filter-bar { display: none; }
+      #halo-diagnosis-demo .halo-filter-bar,
+      #halo-diagnosis-demo .halo-stats,
+      #halo-diagnosis-demo .halo-finding-grid { grid-template-columns: 1fr 1fr; }
+      #halo-diagnosis-demo .halo-task-toggle { grid-template-columns: 1fr; }
+      #halo-diagnosis-demo .halo-task-meta { justify-content: flex-start; }
+      #halo-diagnosis-demo .halo-task-name { white-space: normal; }
+      #halo-diagnosis-demo .halo-task-nav-list { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 400px) {
+      #halo-diagnosis-demo .halo-filter-bar,
+      #halo-diagnosis-demo .halo-stats,
+      #halo-diagnosis-demo .halo-finding-grid { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #halo-diagnosis-demo .halo-chevron { transition: none; }
+    }
+  </style>
+
+  <section class="halo-app" aria-label="批次诊断证据视图">
+    <header class="halo-top">
+      <div class="halo-title-line">
+        <div>
+          <h1>批次诊断证据视图</h1>
+          <p class="halo-kicker">Judge 结果、HALO 根因、Trace 证据与改进建议</p>
+        </div>
+        <span class="halo-chip"><span class="halo-dot halo-ok"></span>示例批次 · 3 Tasks</span>
+      </div>
+    </header>
+
+    <div class="halo-filter-dock">
+      <button type="button" class="halo-filter-toggle" id="halo-filter-toggle" aria-expanded="true">收起筛选</button>
+      <div class="halo-filter-bar" aria-label="批次筛选">
+        <div class="halo-filter">
+          <label for="halo-filter-task">Task</label>
+          <select id="halo-filter-task"><option value="all">全部任务</option></select>
+        </div>
+        <div class="halo-filter">
+          <label for="halo-filter-judge">Judge 状态</label>
+          <select id="halo-filter-judge">
+            <option value="all">全部状态</option>
+            <option value="failed">未通过</option>
+            <option value="passed">通过</option>
+            <option value="missing">缺失</option>
+          </select>
+        </div>
+        <div class="halo-filter">
+          <label for="halo-filter-classification">执行分类</label>
+          <select id="halo-filter-classification">
+            <option value="all">全部分类</option>
+            <option value="FAILED">FAILED</option>
+            <option value="SUCCEEDED_WITH_RECOVERED_ERRORS">RECOVERED</option>
+            <option value="SUCCEEDED_WITH_UNPROVEN_RECOVERY">UNPROVEN RECOVERY</option>
+            <option value="SUCCEEDED_CLEANLY">CLEAN</option>
+            <option value="UNKNOWN">UNKNOWN</option>
+          </select>
+        </div>
+        <div class="halo-filter">
+          <label for="halo-filter-priority">建议优先级</label>
+          <select id="halo-filter-priority">
+            <option value="all">全部优先级</option>
+            <option value="P0">P0</option>
+            <option value="P1">P1</option>
+            <option value="P2">P2</option>
+            <option value="P3">P3</option>
+            <option value="P4">P4</option>
+          </select>
+        </div>
+        <div class="halo-filter">
+          <label for="halo-filter-category">错误类别</label>
+          <select id="halo-filter-category"><option value="all">全部类别</option></select>
+        </div>
+        <div class="halo-filter">
+          <label for="halo-filter-component">修改组件（7 类）</label>
+          <select id="halo-filter-component"><option value="all">全部组件</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="halo-body">
+      <div class="halo-stats">
+        <div class="halo-stat"><span class="halo-count-label">当前任务</span><strong id="halo-stat-tasks">3</strong></div>
+        <div class="halo-stat"><span class="halo-count-label">Judge 未通过</span><strong id="halo-stat-failed">2</strong></div>
+        <div class="halo-stat"><span class="halo-count-label">错误诊断</span><strong id="halo-stat-findings">7</strong></div>
+        <div class="halo-stat"><span class="halo-count-label">改进建议</span><strong id="halo-stat-changes">7</strong></div>
+      </div>
+
+      <div class="halo-legend" aria-label="建议优先级颜色">
+        <span class="halo-muted">建议优先级</span>
+        <span><span class="halo-dot halo-p0"></span> P0</span>
+        <span><span class="halo-dot halo-p1"></span> P1</span>
+        <span><span class="halo-dot halo-p2"></span> P2</span>
+        <span><span class="halo-dot halo-p3"></span> P3</span>
+        <span><span class="halo-dot halo-p4"></span> P4</span>
+        <span class="halo-muted">P0–P4 为报告内相对排序</span>
+      </div>
+
+      <div class="halo-report-layout">
+        <nav class="halo-task-nav" aria-label="任务目录">
+          <h2>任务目录</h2>
+          <div class="halo-task-nav-list" id="halo-task-nav-list"></div>
+        </nav>
+        <div class="halo-report-main">
+          <div class="halo-task-list" id="halo-task-list" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    (() => {
+      const root = document.getElementById('halo-diagnosis-demo');
+      const tasks = [
+        {
+          id: 'task15',
+          name: '根据源文件生成数据可视化图表',
+          judge: { status: 'failed', score: '0.42', rubrics: [
+            { id: 'R2', text: '图表必须使用季度费用数据', detail: '实际使用了月度成本与运营费用之和' },
+            { id: 'R3', text: '费用图必须为水平条形图', detail: '实际生成了纵向柱形图' }
+          ]},
+          classification: 'FAILED',
+          primary: '数据列识别和图表验证均不可靠，导致最终图表内容与类型不符合任务要求。',
+          findings: [
+            { id: 'ERR1', category: 'ENVIRONMENT_FAILURE', title: 'pandas 依赖不可用', summary: 'Runner 连续尝试导入和安装 pandas，但依赖缺失且安装超时。', rootCause: '缺少依赖预检和可用替代路径。', impact: '浪费约 70 秒，但不是最终数据错误的直接原因。', evidence: [
+              { source: 'TRACE', ref: '0260aed5…', tool: 'bash', fact: '导入 pandas 失败', error: "ModuleNotFoundError: No module named 'pandas'" },
+              { source: 'TRACE', ref: 'a1fa3a96…', tool: 'bash', fact: '安装运行 60 秒后超时', error: 'pip install timed out after 60s' }
+            ]},
+            { id: 'ERR2', category: 'DATA_EXTRACTION_ERROR', title: '提取了错误的数据列', summary: 'Runner 使用 D+E 列月度数据，而任务需要 V 列季度费用。', rootCause: '使用硬编码单元格范围，缺少基于表头的列匹配。', impact: '最终图表展示了错误的数据系列。', evidence: [
+              { source: 'TRACE', ref: '941d70a4…', tool: 'bash', fact: '脚本从 D 列和 E 列计算月度费用', error: '' },
+              { source: 'SOURCE_FILE', ref: 'File2.xlsx/Sheet1!V:V', tool: '—', fact: '季度 Expense Amount 位于 V 列', error: '' }
+            ]},
+            { id: 'ERR3', category: 'OUTPUT_VALIDATION_ERROR', title: '图表类型与任务要求不一致', summary: 'Runner 创建了纵向柱形图，任务要求水平条形图。', rootCause: '生成后没有重新验证 chart.type。', impact: 'Judge 的图表类型 Rubric 未通过。', evidence: [
+              { source: 'TRACE', ref: '941d70a4…', tool: 'bash', fact: '代码设置 chart.type = "col"', error: '' },
+              { source: 'JUDGE', ref: 'R3', tool: '—', fact: 'Judge 判定图表方向错误', error: '' }
+            ]},
+            { id: 'ERR4', category: 'VERIFICATION_FAILURE', title: '验证脚本自身执行失败', summary: '两个验证脚本分别触发 TypeError 和 AttributeError。', rootCause: '内联验证代码未经过最小运行检查。', impact: '输出文件未得到可信验证。', evidence: [
+              { source: 'TRACE', ref: '43b37e51…', tool: 'bash', fact: '字典被当作列表切片', error: "TypeError: unhashable type: 'slice'" },
+              { source: 'TRACE', ref: '622ae0aa…', tool: 'bash', fact: '访问不存在的 DataPoint.x', error: "AttributeError: DataPoint has no attribute 'x'" }
+            ]}
+          ],
+          changes: [
+            { priority: 'P0', component: 'new_tool', target: 'workspace_bench_tools.ts', title: '增加结构化 Excel 读取工具', refs: ['ERR2', 'ERR4'], implementation: '按表头和语义名称定位列，并在保存后验证图表引用区域。', criteria: ['数据列必须通过表头名称匹配', '保存后必须重新读取图表引用范围'], impact: '避免错误列提取并减少临时脚本。' },
+            { priority: 'P1', component: 'tool_impl', target: 'workspace_bench_tools.ts', title: '提供稳定的依赖替代路径', refs: ['ERR1'], implementation: '执行前检查依赖；不可用时直接采用 openpyxl。', criteria: ['缺少 pandas 时不再在线安装'], impact: '消除无效安装等待。' },
+            { priority: 'P0', component: 'prompt', target: 'runner_skill.md', title: '强制验证图表类型和数据引用', refs: ['ERR3'], implementation: '保存后检查 chart.type、series 和引用区域。', criteria: ['水平条形图必须验证 type=bar', '引用范围必须与目标表头一致'], impact: '提交前发现图表类型和引用错误。' }
+          ]
+        },
+        {
+          id: 'task25',
+          name: '整理输入文档并生成结构化项目报告',
+          judge: { status: 'failed', score: '0.68', rubrics: [
+            { id: 'R4', text: '报告必须包含风险与负责人', detail: '部分风险项缺少负责人' }
+          ]},
+          classification: 'SUCCEEDED_WITH_UNPROVEN_RECOVERY',
+          primary: '输出文件已生成，但部分字段缺失且最终验证没有覆盖全部必填项。',
+          findings: [
+            { id: 'ERR1', category: 'CONTENT_OMISSION', title: '风险项缺少负责人', summary: '三个风险项中有两个未填写负责人。', rootCause: '生成模板未把负责人列设为必填。', impact: 'Judge 的完整性 Rubric 未通过。', evidence: [
+              { source: 'JUDGE', ref: 'R4', tool: '—', fact: 'Judge 指出风险项负责人缺失', error: '' },
+              { source: 'OUTPUT_FILE', ref: 'project_report.docx', tool: '—', fact: '风险表第二、三行负责人为空', error: '' }
+            ]},
+            { id: 'ERR2', category: 'REDUNDANT_TOOL_USAGE', title: '重复读取同一文档', summary: 'Runner 在内容没有变化时连续读取输入文档四次。', rootCause: '缺少已读取内容的复用策略。', impact: '增加执行时间和上下文占用。', evidence: [
+              { source: 'TRACE', ref: 'c88b1f02…', tool: 'read', fact: '同一路径和参数被重复调用', error: '' }
+            ]}
+          ],
+          changes: [
+            { priority: 'P1', component: 'prompt', target: 'runner_skill.md', title: '将负责人加入风险表必填检查', refs: ['ERR1'], implementation: '提交前逐行检查风险、影响、负责人和缓解措施。', criteria: ['每个风险项都包含非空负责人'], impact: '提升报告字段完整性。' },
+            { priority: 'P2', component: 'tool_impl', target: 'workspace_bench_tools.ts', title: '复用已读取的文档内容', refs: ['ERR2'], implementation: '对相同路径和未变化指纹复用解析结果。', criteria: ['无文件变化时同一路径只解析一次'], impact: '减少重复调用和上下文消耗。' },
+            { priority: 'P0', component: 'middleware_in_tool', target: 'workspace_bench_tools.ts', title: '增加必填字段验证结果', refs: ['ERR1'], implementation: '保存后返回结构化缺失字段列表。', criteria: ['缺失负责人时返回明确错误', '字段齐全时返回 validation=complete'], impact: '提交前阻止不完整报告。' }
+          ]
+        },
+        {
+          id: 'task117',
+          name: '根据日志生成故障复盘文档',
+          judge: { status: 'missing', score: '—', rubrics: [] },
+          classification: 'UNKNOWN',
+          primary: 'Trace 缺少明确的根执行终止字段，无法确认任务是否正常完成。',
+          findings: [
+            { id: 'ERR1', category: 'MISSING_TERMINAL_EVIDENCE', title: '缺少根执行终止证据', summary: 'Trace 包含工具活动，但没有可验证的根 Agent 结束事件。', rootCause: '日志采集在会话结束前停止。', impact: '无法可靠区分完成、超时或中断。', evidence: [
+              { source: 'TRACE', ref: 'trace-root-117', tool: 'AGENT', fact: '根 Span 没有终止状态', error: '' }
+            ]}
+          ],
+          changes: [
+            { priority: 'P1', component: 'middleware_in_tool', target: 'workspace_bench_tools.ts', title: '保证写入根执行终止事件', refs: ['ERR1'], implementation: '在正常、异常和超时出口统一写入根执行终止状态。', criteria: ['每次执行恰好存在一个根终止事件'], impact: '让 HALO 能可靠分类执行结果。' }
+          ]
+        }
+      ];
+
+      const state = {
+        task: 'all', judge: 'all', classification: 'all', priority: 'all', category: 'all', component: 'all',
+        open: new Set()
+      };
+
+      const priorities = ['P0', 'P1', 'P2', 'P3', 'P4'];
+      const components = [
+        'tool_definition',
+        'tool_impl',
+        'new_tool',
+        'tool_merge',
+        'tool_split',
+        'middleware_in_tool',
+        'prompt'
+      ];
+      const categoryLabels = {
+        ENVIRONMENT_FAILURE: '环境依赖失败',
+        DATA_EXTRACTION_ERROR: '数据提取错误',
+        OUTPUT_VALIDATION_ERROR: '输出验证错误',
+        VERIFICATION_FAILURE: '验证流程失败',
+        CONTENT_OMISSION: '内容缺失',
+        REDUNDANT_TOOL_USAGE: '工具重复调用',
+        MISSING_TERMINAL_EVIDENCE: '缺少终止证据'
+      };
+      const priorityRank = (priority) => priorities.indexOf(priority);
+
+      const make = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+      const select = (id) => root.querySelector(`#${id}`);
+      const option = (value, label) => {
+        const node = document.createElement('option');
+        node.value = value;
+        node.textContent = label;
+        return node;
+      };
+      const priorityBadge = (priority) => make('span', `halo-priority ${priority.toLowerCase()}`, priority);
+      const judgeText = (judge) => judge.status === 'failed' ? `Judge 未通过 · ${judge.score}` : judge.status === 'passed' ? `Judge 通过 · ${judge.score}` : 'Judge 缺失';
+      const judgeClass = (judge) => judge.status;
+      const taskColorClass = (task) => {
+        const index = tasks.findIndex((item) => item.id === task.id);
+        return `halo-task-color-${Math.max(index, 0) % 6}`;
+      };
+
+      function populateFilters() {
+        tasks.forEach((task) => select('halo-filter-task').append(option(task.id, task.id)));
+        [...new Set(tasks.flatMap((task) => task.findings.map((finding) => finding.category)))].sort().forEach((value) => select('halo-filter-category').append(option(value, categoryLabels[value] || value)));
+        components.forEach((value) => select('halo-filter-component').append(option(value, value)));
+      }
+
+      function mergeChanges(changes) {
+        const merged = new Map();
+        changes.forEach((change) => {
+          const key = [change.component, change.target, change.title, change.implementation].join('|');
+          if (!merged.has(key)) {
+            merged.set(key, {
+              ...change,
+              refs: [...new Set(change.refs)],
+              criteria: [...new Set(change.criteria)]
+            });
+            return;
+          }
+          const current = merged.get(key);
+          current.refs = [...new Set([...current.refs, ...change.refs])];
+          current.criteria = [...new Set([...current.criteria, ...change.criteria])];
+          if (priorityRank(change.priority) < priorityRank(current.priority)) current.priority = change.priority;
+        });
+        return [...merged.values()].sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
+      }
+
+      function visibleChanges(task) {
+        return mergeChanges(task.changes)
+          .filter((change) =>
+            (state.priority === 'all' || change.priority === state.priority) &&
+            (state.component === 'all' || change.component === state.component)
+          )
+          .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
+      }
+
+      function visibleFindings(task, changes) {
+        const restrictToChanges = state.priority !== 'all' || state.component !== 'all';
+        return task.findings
+          .filter((finding) =>
+            (state.category === 'all' || finding.category === state.category) &&
+            (!restrictToChanges || changes.some((change) => change.refs.includes(finding.id)))
+          )
+          .sort((a, b) => {
+            const rank = (finding) => {
+              const related = task.changes.filter((change) => change.refs.includes(finding.id));
+              return related.length ? Math.min(...related.map((change) => priorityRank(change.priority))) : priorities.length;
+            };
+            return rank(a) - rank(b);
+          });
+      }
+
+      function taskView(task) {
+        let changes = visibleChanges(task);
+        const findings = visibleFindings(task, changes);
+        if (state.category !== 'all') {
+          const visibleFindingIds = new Set(findings.map((finding) => finding.id));
+          changes = changes.filter((change) => change.refs.some((ref) => visibleFindingIds.has(ref)));
+        }
+        const baseMatch =
+          (state.task === 'all' || task.id === state.task) &&
+          (state.judge === 'all' || task.judge.status === state.judge) &&
+          (state.classification === 'all' || task.classification === state.classification);
+        const priorityMatch = state.priority === 'all' || changes.length > 0;
+        const categoryMatch = state.category === 'all' || findings.length > 0;
+        const componentMatch = state.component === 'all' || changes.length > 0;
+        const detailMatch = priorityMatch && categoryMatch && componentMatch;
+        return { task, changes, findings, visible: baseMatch && detailMatch };
+      }
+
+      function renderStats(views) {
+        const current = views.filter((view) => view.visible);
+        select('halo-stat-tasks').textContent = String(current.length);
+        select('halo-stat-failed').textContent = String(current.filter((view) => view.task.judge.status === 'failed').length);
+        select('halo-stat-findings').textContent = String(current.reduce((sum, view) => sum + view.findings.length, 0));
+        select('halo-stat-changes').textContent = String(current.reduce((sum, view) => sum + view.changes.length, 0));
+      }
+
+      function renderRubrics(task) {
+        const section = make('section', 'halo-section');
+        const title = make('div', 'halo-section-title');
+        title.append(make('h3', '', 'Judge 未通过项'), make('span', 'halo-muted', task.judge.rubrics.length ? `${task.judge.rubrics.length} 项` : '无 Judge 数据'));
+        section.append(title);
+        if (!task.judge.rubrics.length) {
+          section.append(make('p', 'halo-muted', '该任务没有可用的 Judge Rubric。'));
+          return section;
+        }
+        const list = make('div', 'halo-rubrics');
+        task.judge.rubrics.forEach((rubric) => {
+          const row = make('div', 'halo-rubric');
+          row.append(make('span', 'halo-rubric-mark', rubric.id));
+          const body = make('div');
+          body.append(make('p', '', rubric.text), make('p', 'halo-muted', rubric.detail));
+          row.append(body);
+          list.append(row);
+        });
+        section.append(list);
+        return section;
+      }
+
+      function renderChange(change, task) {
+        const article = make('article', `halo-change ${change.priority.toLowerCase()}`);
+        const head = make('div', 'halo-change-head');
+        const title = make('div', 'halo-finding-title');
+        title.append(priorityBadge(change.priority), make('h3', '', change.title));
+        head.append(title, make('span', 'halo-chip', change.component));
+        const linkedProblems = change.refs.map((ref) => {
+          const finding = task.findings.find((item) => item.id === ref);
+          return finding ? `${ref} ${finding.title}` : ref;
+        });
+        article.append(head, make('p', 'halo-change-meta', `${change.target} · 关联问题：${linkedProblems.join('；')}`));
+        article.append(make('p', '', `实施：${change.implementation}`));
+        const list = make('ul');
+        change.criteria.forEach((criterion) => list.append(make('li', '', criterion)));
+        article.append(list, make('p', '', `预期收益：${change.impact}`));
+        return article;
+      }
+
+      function renderFinding(finding) {
+        const article = make('article', 'halo-finding');
+        const head = make('div', 'halo-finding-head');
+        const title = make('div', 'halo-finding-title');
+        title.append(make('h3', '', `${finding.id} · ${finding.title}`));
+        head.append(title, make('span', 'halo-chip', categoryLabels[finding.category] || finding.category));
+        article.append(head, make('p', '', finding.summary));
+
+        const grid = make('div', 'halo-finding-grid');
+        const rootCause = make('div', 'halo-field');
+        rootCause.append(make('span', 'halo-field-label', 'Root Cause'), make('span', '', finding.rootCause));
+        const impact = make('div', 'halo-field');
+        impact.append(make('span', 'halo-field-label', 'Impact'), make('span', '', finding.impact));
+        grid.append(rootCause, impact);
+        article.append(grid);
+
+        const evidenceDetails = make('details', 'halo-evidence-toggle');
+        evidenceDetails.append(make('summary', '', `查看 Trace / Judge 证据（${finding.evidence.length}）`));
+        const evidenceList = make('div', 'halo-evidence-list');
+        finding.evidence.forEach((evidence) => {
+          const item = make('div', 'halo-evidence');
+          const evidenceHead = make('div', 'halo-evidence-head');
+          evidenceHead.append(make('span', 'halo-chip', evidence.source), make('code', '', evidence.ref));
+          item.append(evidenceHead, make('p', '', evidence.fact), make('p', 'halo-muted', `${evidence.tool}${evidence.error ? ` · ${evidence.error}` : ''}`));
+          evidenceList.append(item);
+        });
+        evidenceDetails.append(evidenceList);
+        article.append(evidenceDetails);
+
+        return article;
+      }
+
+      function renderTask(view) {
+        const { task, findings, changes } = view;
+        const article = make('article', `halo-task ${taskColorClass(task)}${state.open.has(task.id) ? ' is-open' : ''}`);
+        article.id = `halo-${task.id}`;
+        const toggle = make('button', 'halo-task-toggle');
+        toggle.type = 'button';
+        toggle.setAttribute('aria-expanded', String(state.open.has(task.id)));
+
+        const main = make('div', 'halo-task-main');
+        main.append(make('span', 'halo-task-id', task.id), make('span', 'halo-task-name', task.name));
+        const meta = make('div', 'halo-task-meta');
+        meta.append(make('span', `halo-chip ${judgeClass(task.judge)}`, judgeText(task.judge)));
+        meta.append(make('span', 'halo-chip', `${findings.length} 个问题`));
+        meta.append(make('span', 'halo-chip', `${changes.length} 条建议`));
+        meta.append(make('span', 'halo-chevron', '›'));
+        toggle.append(main, meta);
+        toggle.addEventListener('click', () => {
+          if (state.open.has(task.id)) state.open.delete(task.id); else state.open.add(task.id);
+          render();
+        });
+        article.append(toggle);
+
+        const detail = make('div', 'halo-task-detail');
+        const primary = make('div', 'halo-primary');
+        primary.append(make('span', 'halo-field-label', task.classification), make('p', '', task.primary));
+        detail.append(primary, renderRubrics(task));
+
+        const section = make('section', 'halo-section');
+        const grid = make('div', 'halo-diagnosis-grid');
+
+        const problemColumn = make('div', 'halo-diagnosis-column');
+        const problemHeading = make('div', 'halo-column-heading');
+        problemHeading.append(make('h3', '', '问题与证据'), make('span', 'halo-muted', `${findings.length} 个问题`));
+        const problemList = make('div', 'halo-problem-list');
+        if (findings.length) findings.forEach((finding) => problemList.append(renderFinding(finding)));
+        else problemList.append(make('p', 'halo-muted', '当前筛选条件下没有匹配的问题。'));
+        problemColumn.append(problemHeading, problemList);
+
+        const suggestionColumn = make('div', 'halo-diagnosis-column');
+        const suggestionHeading = make('div', 'halo-column-heading');
+        suggestionHeading.append(make('h3', '', '合并后的改进建议'), make('span', 'halo-muted', `${changes.length} 条建议`));
+        const suggestionList = make('div', 'halo-suggestion-list');
+        if (changes.length) changes.forEach((change) => suggestionList.append(renderChange(change, task)));
+        else suggestionList.append(make('p', 'halo-muted', '当前筛选条件下没有匹配的建议。'));
+        suggestionColumn.append(suggestionHeading, suggestionList);
+
+        grid.append(problemColumn, suggestionColumn);
+        section.append(grid);
+        detail.append(section);
+        article.append(detail);
+        return article;
+      }
+
+      function render() {
+        const views = tasks.map(taskView);
+        renderStats(views);
+        const container = select('halo-task-list');
+        const navigation = select('halo-task-nav-list');
+        container.replaceChildren();
+        navigation.replaceChildren();
+        const visible = views.filter((view) => view.visible);
+        if (!visible.length) {
+          container.append(make('div', 'halo-empty', '没有符合当前筛选条件的任务。'));
+          return;
+        }
+        visible.forEach((view) => {
+          container.append(renderTask(view));
+          const item = make('a', 'halo-nav-link', view.task.id);
+          item.href = `#halo-${view.task.id}`;
+          navigation.append(item);
+        });
+      }
+
+      const bindings = [
+        ['halo-filter-task', 'task'],
+        ['halo-filter-judge', 'judge'],
+        ['halo-filter-classification', 'classification'],
+        ['halo-filter-priority', 'priority'],
+        ['halo-filter-category', 'category'],
+        ['halo-filter-component', 'component']
+      ];
+      bindings.forEach(([id, key]) => select(id).addEventListener('change', (event) => {
+        state[key] = event.target.value;
+        render();
+      }));
+
+      const filterDock = root.querySelector('.halo-filter-dock');
+      const filterToggle = select('halo-filter-toggle');
+      const setFiltersCollapsed = (collapsed) => {
+        filterDock.classList.toggle('is-collapsed', collapsed);
+        filterToggle.setAttribute('aria-expanded', String(!collapsed));
+        filterToggle.textContent = collapsed ? '展开筛选' : '收起筛选';
+      };
+      setFiltersCollapsed(window.matchMedia('(max-width: 620px)').matches);
+      filterToggle.addEventListener('click', () => {
+        setFiltersCollapsed(filterToggle.getAttribute('aria-expanded') === 'true');
+      });
+
+      populateFilters();
+      render();
+    })();
+  </script>
+</div>

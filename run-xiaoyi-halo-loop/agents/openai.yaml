@@ -1,4 +1,4 @@
 interface:
   display_name: "Run XiaoYi + HALO Loop"
-  short_description: "批量运行、Agent Judge 并生成 HALO 诊断"
-  default_prompt: "Use $run-xiaoyi-halo-loop to run and Judge selected XiaoYi tasks, then diagnose all tasks with usable traces, including Runner timeouts."
+  short_description: "批量运行、Judge、HALO 诊断并生成交互式 HTML 报告"
+  default_prompt: "Use $run-xiaoyi-halo-loop to run and Judge selected XiaoYi tasks, diagnose every selected task with a usable trace, and render the fixed batch HTML diagnosis report."

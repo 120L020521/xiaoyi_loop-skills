@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -11,6 +12,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from render_batch_report import read_batch_payload, render_batch_report
 
 
 SCHEMA_VERSION = 3
@@ -46,6 +49,14 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
         json.dumps(value, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _require_exact_keys(value: dict[str, Any], expected: tuple[str, ...], label: str) -> None:
@@ -453,15 +464,35 @@ def summarize_command(args: argparse.Namespace) -> int:
     errors: list[str] = []
     reported = 0
     for task in resolved["tasks"]:
+        task_id = task["task_id"]
+        trace_path = Path(task["paths"]["trace_jsonl"])
+        judge_result_path = (
+            Path(resolved["roots"]["judge_run"])
+            / f"task{task_id}"
+            / "judge_result.json"
+        )
         record: dict[str, Any] = {
-            "task_id": task["task_id"],
+            "task_id": task_id,
+            "task": task["prompt_context"].get("task"),
+            "trace_fingerprint": _sha256_file(trace_path) if trace_path.is_file() else "",
             "runner_status": task["runner_status"],
             "judge_status": task["judge_status"],
             "judge_passed": task["judge_passed"],
             "judge_score": task["judge_score"],
             "halo_status": "not_selected",
             "execution_classification": "",
+            "primary_failure_mode": "",
+            "error_findings": [],
+            "proposed_changes": [],
             "report_path": "",
+            "report_uri": "",
+            "judge_result_uri": (
+                judge_result_path.resolve().as_uri()
+                if judge_result_path.is_file()
+                else ""
+            ),
+            "trace_uri": trace_path.resolve().as_uri() if trace_path.is_file() else "",
+            "halo_message": "",
         }
         if task["eligible"]:
             try:
@@ -470,33 +501,63 @@ def summarize_command(args: argparse.Namespace) -> int:
                     handoff_path=handoff_path,
                 )
                 record["report_path"] = str(report_path)
-                if report.get("schema_version") != 5:
-                    raise ValueError(f"HALO report schema_version must be 5: {report_path}")
+                record["report_uri"] = report_path.resolve().as_uri()
+                if report.get("schema_version") != 6:
+                    raise ValueError(f"HALO report schema_version must be 6: {report_path}")
+                report_summary = report.get("report_summary")
+                if not isinstance(report_summary, dict):
+                    raise ValueError(f"HALO report summary must be an object: {report_path}")
                 diagnosis = report.get("diagnosis")
                 if not isinstance(diagnosis, dict):
                     raise ValueError(f"HALO report diagnosis must be an object: {report_path}")
                 classification = diagnosis.get("execution_classification")
                 if not isinstance(classification, str) or not classification:
                     raise ValueError(f"HALO report classification is missing: {report_path}")
+                primary_failure_mode = diagnosis.get("primary_failure_mode")
+                findings = diagnosis.get("error_findings")
+                changes = report.get("proposed_changes")
+                if not isinstance(primary_failure_mode, str):
+                    raise ValueError(f"HALO report primary_failure_mode is invalid: {report_path}")
+                if not isinstance(findings, list):
+                    raise ValueError(f"HALO report error_findings must be an array: {report_path}")
+                if not isinstance(changes, list):
+                    raise ValueError(f"HALO report proposed_changes must be an array: {report_path}")
                 record["halo_status"] = "success"
                 record["execution_classification"] = classification
+                record["primary_failure_mode"] = primary_failure_mode
+                record["error_findings"] = findings
+                record["proposed_changes"] = changes
+                report_task = report_summary.get("task")
+                if isinstance(report_task, str) and report_task:
+                    record["task"] = report_task
                 reported += 1
             except ValueError as exc:
                 record["halo_status"] = "error"
-                errors.append(f"task {task['task_id']}: {exc}")
+                record["halo_message"] = str(exc)
+                errors.append(f"task {task_id}: {exc}")
         elif task["skip_reason"] == "trace_missing":
             record["halo_status"] = "skipped_missing_trace"
+            record["halo_message"] = "Trace 缺失，已跳过诊断。"
+        elif task["skip_reason"] == "filtered_by_diagnose_mode":
+            record["halo_status"] = "skipped_by_mode"
+            record["halo_message"] = "未命中当前诊断模式，已跳过。"
         summary_tasks.append(record)
 
     output_path = (
         args.output.resolve()
         if args.output is not None
-        else Path(resolved["roots"]["halo_output"]) / "batch_summary.json"
+        else Path(resolved["roots"]["halo_output"]) / "batch_diagnosis_report.html"
     )
-    summary = {
-        "schema_version": 1,
-        "handoff": str(handoff_path),
-        "diagnose_mode": resolved["diagnose_mode"],
+    render_batch_report(
+        output_path,
+        handoff_path=handoff_path,
+        diagnose_mode=resolved["diagnose_mode"],
+        tasks=summary_tasks,
+        errors=errors,
+    )
+    print(json.dumps({
+        "status": "ok" if not errors else "partial",
+        "html_report": str(output_path),
         "totals": {
             "requested": len(resolved["tasks"]),
             "eligible": len(resolved["eligible_task_ids"]),
@@ -504,13 +565,15 @@ def summarize_command(args: argparse.Namespace) -> int:
             "reported": reported,
             "failed": len(errors),
         },
-        "tasks": summary_tasks,
-        "errors": errors,
-    }
-    _write_json(output_path, summary)
-    print(json.dumps({
-        "status": "ok" if not errors else "partial",
-        "summary": str(output_path),
+        "tasks": [
+            {
+                "task_id": item["task_id"],
+                "judge_status": item["judge_status"],
+                "halo_status": item["halo_status"],
+                "report_path": item["report_path"],
+            }
+            for item in summary_tasks
+        ],
         "errors": errors,
     }, ensure_ascii=False))
     return 0
@@ -806,7 +869,7 @@ state_file = "artifacts/custom_state.json"
         checks += 1
 
         handoff_path = root / "handoff.json"
-        summary_path = roots["halo_output"] / "batch_summary.json"
+        summary_path = roots["halo_output"] / "batch_diagnosis_report.html"
         _write_json(handoff_path, handoff)
 
         def write_halo_artifacts(task_id: int, classification: str) -> tuple[Path, Path]:
@@ -814,9 +877,52 @@ state_file = "artifacts/custom_state.json"
             artifact_dir = Path(task["paths"]["halo_artifact_dir"])
             report_path = artifact_dir / "halo_report.json"
             manifest_path = artifact_dir / "halo-prepared-manifest.json"
+            findings = [] if classification == "SUCCEEDED_CLEANLY" else [{
+                "error_id": "ERR1",
+                "priority": "P0",
+                "category": "TOOL_FAILURE",
+                "title": "测试工具调用失败",
+                "occurrence_count": 1,
+                "summary": "工具调用返回错误。",
+                "evidence": [{
+                    "source": "TRACE",
+                    "reference": "span-1",
+                    "tool": "bash",
+                    "fact": "工具返回非零状态。",
+                    "error": "exit code 1",
+                }],
+                "root_cause": "测试环境与工具参数不兼容。",
+                "recovery_status": "UNRECOVERED",
+                "impact": "任务未完成。",
+            }]
+            changes = [] if classification == "SUCCEEDED_CLEANLY" else [{
+                "priority": "P0",
+                "component": "tool_impl",
+                "target": "test_tool.py",
+                "title": "修复工具参数校验",
+                "error_refs": ["ERR1"],
+                "problem": "错误参数未被提前拦截。",
+                "implementation": "在调用前验证参数。",
+                "acceptance_criteria": ["错误参数返回明确提示"],
+                "expected_impact": "避免无效工具调用。",
+            }]
             _write_json(report_path, {
-                "schema_version": 5,
-                "diagnosis": {"execution_classification": classification},
+                "schema_version": 6,
+                "report_summary": {
+                    "task_id": f"task{task_id}",
+                    "task": f"测试任务 {task_id}",
+                    "trace_ids": ["trace-1"],
+                },
+                "diagnosis": {
+                    "execution_classification": classification,
+                    "primary_failure_mode": (
+                        "无显著失败。"
+                        if classification == "SUCCEEDED_CLEANLY"
+                        else "工具参数与运行环境不兼容。"
+                    ),
+                    "error_findings": findings,
+                },
+                "proposed_changes": changes,
             })
             _write_json(manifest_path, {
                 "schema_version": 3,
@@ -833,18 +939,26 @@ state_file = "artifacts/custom_state.json"
         write_halo_artifacts(19, "FAILED")
         old_ns = handoff_path.stat().st_mtime_ns - 1_000_000_000
         os.utime(stale_manifest, ns=(old_ns, old_ns))
-        with contextlib.redirect_stdout(io.StringIO()):
+        stale_stdout = io.StringIO()
+        with contextlib.redirect_stdout(stale_stdout):
             stale_status = summarize_command(argparse.Namespace(
                 handoff=handoff_path,
                 output=summary_path,
             ))
-        stale_summary = _read_json(summary_path, "stale summary")
+        stale_summary = json.loads(stale_stdout.getvalue())
         if stale_status != 0 or stale_summary["totals"]["failed"] != 1:
             raise AssertionError("stale HALO artifacts were not isolated as one Task failure")
         checks += 1
 
+        legacy_html = summary_path.read_text(encoding="utf-8").replace(
+            '"payload_schema_version":1,',
+            "",
+            1,
+        )
+        summary_path.write_text(legacy_html, encoding="utf-8")
         write_halo_artifacts(14, "SUCCEEDED_CLEANLY")
-        with contextlib.redirect_stdout(io.StringIO()):
+        summary_stdout = io.StringIO()
+        with contextlib.redirect_stdout(summary_stdout):
             summary_status = summarize_command(argparse.Namespace(
                 handoff=handoff_path,
                 output=summary_path,
@@ -852,7 +966,7 @@ state_file = "artifacts/custom_state.json"
         if summary_status != 0:
             raise AssertionError("summary command failed")
         checks += 1
-        summary = _read_json(summary_path, "batch summary")
+        summary = json.loads(summary_stdout.getvalue())
         if summary["totals"] != {
             "requested": 6,
             "eligible": 4,
@@ -861,6 +975,89 @@ state_file = "artifacts/custom_state.json"
             "failed": 0,
         }:
             raise AssertionError(f"unexpected summary totals: {summary['totals']}")
+        checks += 1
+        html = summary_path.read_text(encoding="utf-8")
+        if (
+            "<!doctype html>" not in html
+            or "小艺批次诊断报告" not in html
+            or "position: sticky" not in html
+            or "task color-" not in html
+            or "task-nav-list" not in html
+            or "filter-toggle" not in html
+            or "__BATCH_DATA__" in html
+        ):
+            raise AssertionError("fixed-format HTML report is incomplete")
+        checks += 1
+        cumulative = read_batch_payload(summary_path)
+        if cumulative is None:
+            raise AssertionError("cumulative HTML payload is missing")
+        cumulative_ids = [item["task_id"] for item in cumulative["tasks"]]
+        task14 = next((item for item in cumulative["tasks"] if item["task_id"] == 14), None)
+        if task14 is None:
+            raise AssertionError(f"cumulative HTML lost task 14: {cumulative_ids}")
+        if (
+            cumulative["payload_schema_version"] != 1
+            or
+            cumulative["batch_runs"] != 2
+            or len(cumulative_ids) != len(set(cumulative_ids))
+            or task14["halo_status"] != "success"
+        ):
+            raise AssertionError("same-Task cumulative HTML replacement failed")
+        checks += 1
+        render_batch_report(
+            summary_path,
+            handoff_path=handoff_path,
+            diagnose_mode="all",
+            tasks=[{
+                "task_id": 99,
+                "task": "新增累计任务",
+                "trace_fingerprint": "99" * 32,
+                "runner_status": "completed",
+                "judge_status": "missing",
+                "judge_passed": None,
+                "judge_score": None,
+                "halo_status": "success",
+                "execution_classification": "SUCCEEDED_CLEANLY",
+                "primary_failure_mode": "无显著失败。",
+                "error_findings": [],
+                "proposed_changes": [],
+                "report_path": "",
+                "report_uri": "",
+                "judge_result_uri": "",
+                "trace_uri": "",
+                "halo_message": "",
+            }],
+            errors=[],
+        )
+        cumulative = read_batch_payload(summary_path)
+        if cumulative is None:
+            raise AssertionError("updated cumulative HTML payload is missing")
+        cumulative_ids = [item["task_id"] for item in cumulative["tasks"]]
+        if (
+            cumulative["batch_runs"] != 3
+            or 99 not in cumulative_ids
+            or 14 not in cumulative_ids
+            or len(cumulative_ids) != len(set(cumulative_ids))
+        ):
+            raise AssertionError("new-Task cumulative HTML append failed")
+        checks += 1
+        original_task14 = next(item for item in cumulative["tasks"] if item["task_id"] == 14)
+        alternate_task14 = dict(original_task14)
+        alternate_task14["trace_fingerprint"] = "14" * 32
+        alternate_task14["task"] = "相同 Task ID 的另一条 Trace"
+        render_batch_report(
+            summary_path,
+            handoff_path=handoff_path,
+            diagnose_mode="all",
+            tasks=[alternate_task14],
+            errors=[],
+        )
+        cumulative = read_batch_payload(summary_path)
+        if cumulative is None:
+            raise AssertionError("fingerprint-aware cumulative HTML payload is missing")
+        task14_records = [item for item in cumulative["tasks"] if item["task_id"] == 14]
+        if cumulative["batch_runs"] != 4 or len(task14_records) != 2:
+            raise AssertionError("Trace fingerprint did not distinguish reused Task IDs")
         checks += 1
 
     print(json.dumps({"status": "ok", "checks": checks}, ensure_ascii=False))
@@ -915,7 +1112,7 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("handoff", type=Path)
     resolve.set_defaults(func=lambda args: validate_command(args, show_paths=True))
 
-    summarize = subparsers.add_parser("summarize", help="Write the combined Judge/HALO summary")
+    summarize = subparsers.add_parser("summarize", help="Render the combined Judge/HALO HTML report")
     summarize.add_argument("handoff", type=Path)
     summarize.add_argument("--output", type=Path)
     summarize.set_defaults(func=summarize_command)
