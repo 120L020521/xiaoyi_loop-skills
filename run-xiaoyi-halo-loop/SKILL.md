@@ -188,6 +188,15 @@ priority/change-component filters, display error categories in Chinese, merge
 identical changes and combine their `error_refs`, sort changes from P0 to P4,
 and link to available Judge, Trace, and HALO JSON files. Task rails cycle
 through six contrasting colors so adjacent Tasks remain visually distinct.
+Within each Task, render one centered diagnosis stream instead of separate
+problem/change columns. Group each change with all errors referenced by its
+`error_refs`, and present it in this order: priority, “问题是什么”, “怎么解决”,
+then a folded “是根据什么修改的” evidence chain. Show the change's problem
+sources (including full Trace `span_id` values), target component layer and
+target file. In expanded evidence, render Trace records as readable JSON code
+blocks and render Judge/source/output evidence as concise evidence notes. Keep
+the palette restrained and use color only to distinguish priorities, problems,
+solutions, evidence links, and expected impact.
 When one Task fails or lacks a trace, render the remaining valid Tasks and
 record the failed or skipped Task in the same HTML.
 

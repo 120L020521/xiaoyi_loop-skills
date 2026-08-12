@@ -189,44 +189,63 @@ _DOCUMENT = r'''<!doctype html>
     .links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     .links a { color: var(--blue); text-decoration: none; white-space: nowrap; }
     .links a:hover { text-decoration: underline; }
-    .columns { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 16px; align-items: start; }
-    .section-title { display: flex; justify-content: space-between; align-items: center; margin: 0 0 9px; font-size: 15px; }
+    .diagnosis-title { display: flex; justify-content: space-between; align-items: center; margin: 0 0 9px; font-size: 15px; }
     .section-count { color: var(--muted); font-size: 12px; font-weight: 400; }
-    .stack { display: grid; gap: 10px; }
-    .finding, .change { background: var(--surface-soft); border-radius: 11px; padding: 13px; }
-    .finding-head, .change-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+    .diagnosis-stream { display: grid; gap: 12px; }
+    .bundle { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .bundle.p0 { border-left: 4px solid var(--red); }
+    .bundle.p1 { border-left: 4px solid var(--orange); }
+    .bundle.p2 { border-left: 4px solid var(--yellow); }
+    .bundle.p3 { border-left: 4px solid var(--blue); }
+    .bundle.p4 { border-left: 4px solid var(--purple); }
+    .bundle-head, .finding-head, .change-head, .evidence-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+    .bundle-head { align-items: center; background: color-mix(in srgb, var(--surface-soft) 86%, var(--surface)); border-bottom: 1px solid var(--border); padding: 10px 13px; }
+    .bundle-meta, .change-title { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .flow-label { color: var(--muted); display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+    .flow-label.problem { color: var(--red); }
+    .flow-label.solution { color: var(--blue); }
+    .problem-panel { border-bottom: 1px solid var(--border); padding: 13px; }
+    .finding + .finding { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
     .finding h3, .change h3 { margin: 0; font-size: 15px; font-weight: 600; }
-    .finding p, .change p { margin: 8px 0 0; }
-    .category { background: var(--red-soft); color: var(--red); border-radius: 999px; font-size: 12px; padding: 4px 8px; white-space: nowrap; }
-    .change { background: var(--surface); border: 1px solid var(--border); }
-    .change.p0 { border-left: 4px solid var(--red); }
-    .change.p1 { border-left: 4px solid var(--orange); }
-    .change.p2 { border-left: 4px solid var(--yellow); }
-    .change.p3 { border-left: 4px solid var(--blue); }
-    .change.p4 { border-left: 4px solid var(--purple); }
+    .finding h3 { color: var(--red); }
+    .finding p, .change p { margin: 7px 0 0; }
+    .category { background: var(--red-soft); border: 1px solid color-mix(in srgb, var(--red) 22%, var(--border)); color: var(--red); border-radius: 4px; font-size: 12px; padding: 2px 6px; white-space: nowrap; }
+    .solution-panel { background: color-mix(in srgb, var(--blue-soft) 35%, var(--surface)); padding: 13px; }
+    .solution-panel h3 { color: var(--blue); }
     .priority { border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; padding: 3px 6px; }
     .priority.p0 { background: var(--red); }
     .priority.p1 { background: var(--orange); }
     .priority.p2 { background: var(--yellow); }
     .priority.p3 { background: var(--blue); }
     .priority.p4 { background: var(--purple); }
-    .change-title { display: flex; gap: 8px; align-items: center; }
-    .component { color: var(--purple); background: var(--purple-soft); border-radius: 999px; font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+    .component { color: var(--purple); background: var(--purple-soft); border-radius: 4px; font-size: 12px; padding: 3px 7px; white-space: nowrap; }
     .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 10px; }
-    .field { color: var(--muted); font-size: 13px; }
+    .field { background: var(--surface-soft); border-left: 2px solid var(--border); color: var(--text); font-size: 13px; padding: 8px 10px; }
     .field strong { color: var(--text); display: block; font-size: 12px; margin-bottom: 2px; }
-    .refs { color: var(--muted); font-size: 12px; margin-top: 8px; }
-    .evidence { margin-top: 9px; }
-    .evidence summary { color: var(--blue); cursor: pointer; font-size: 13px; }
-    .evidence-list { display: grid; gap: 7px; margin-top: 8px; }
-    .evidence-item { background: color-mix(in srgb, var(--surface) 75%, transparent); border-radius: 8px; padding: 9px; font-size: 12px; }
+    .change-context { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 10px 0; }
+    .change-context .field:first-child span { color: var(--purple); }
+    .change-context .field:last-child span { color: var(--blue); }
+    .implementation { margin-top: 8px; }
+    .criteria { display: grid; gap: 4px; list-style: none; margin: 9px 0 0; padding: 0; }
+    .criteria li::before { color: var(--green); content: "✓"; margin-right: 7px; }
+    .expected-impact { color: var(--green); }
+    .evidence { border-top: 1px solid var(--border); }
+    .evidence summary { color: var(--blue); cursor: pointer; font-size: 13px; font-weight: 600; padding: 11px 13px; }
+    .evidence summary:hover { background: var(--blue-soft); }
+    .evidence-list { display: grid; gap: 12px; padding: 10px 13px 13px; }
+    .evidence-intro { border-left: 2px solid var(--yellow); margin: 0; padding-left: 9px; }
+    .evidence-item { border-top: 1px solid var(--border); display: grid; gap: 6px; padding-top: 11px; font-size: 13px; }
+    .evidence-ref { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; overflow-wrap: anywhere; }
+    .evidence-note { border-left: 2px solid var(--border); padding-left: 9px; }
+    .raw-trace { background: light-dark(#1d2430, #0d1016); border-radius: 4px; color: light-dark(#eaf0fa, #dce5f5); font-size: 12px; line-height: 1.5; margin: 2px 0 0; overflow-x: auto; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; }
+    .raw-trace code { color: inherit; }
     code { color: var(--purple); overflow-wrap: anywhere; }
     .raw-error { color: var(--red); margin-top: 4px; overflow-wrap: anywhere; }
     .empty { color: var(--muted); padding: 18px; text-align: center; }
     .batch-errors { margin-top: 14px; background: var(--red-soft); color: var(--red); border-radius: 11px; padding: 12px 14px; }
     .batch-errors ul { margin: 7px 0 0; padding-left: 20px; }
-    @media (max-width: 880px) { .filters { grid-template-columns: repeat(3, 1fr); } .report-layout { grid-template-columns: 1fr; } .task-nav { position: static; max-height: none; } .task-nav-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } .columns { grid-template-columns: 1fr; } }
-    @media (max-width: 620px) { .shell { width: min(100% - 16px, 1180px); margin-top: 8px; } .hero-top, .summary { grid-template-columns: 1fr; display: grid; } .metrics { grid-template-columns: repeat(2, 1fr); } .filter-toggle { display: block; } .filter-dock.filters-collapsed .filters { display: none; } .filters { grid-template-columns: repeat(2, 1fr); margin-top: 10px; } .task-nav-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .task-toggle { grid-template-columns: 1fr; } .task-meta { justify-content: flex-start; } .links { justify-content: flex-start; } .field-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 880px) { .filters { grid-template-columns: repeat(3, 1fr); } .report-layout { grid-template-columns: 1fr; } .task-nav { position: static; max-height: none; } .task-nav-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 620px) { .shell { width: min(100% - 16px, 1180px); margin-top: 8px; } .hero-top, .summary { grid-template-columns: 1fr; display: grid; } .metrics { grid-template-columns: repeat(2, 1fr); } .filter-toggle { display: block; } .filter-dock.filters-collapsed .filters { display: none; } .filters { grid-template-columns: repeat(2, 1fr); margin-top: 10px; } .task-nav-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .task-toggle { grid-template-columns: 1fr; } .task-meta { justify-content: flex-start; } .links { justify-content: flex-start; } .field-grid, .change-context { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -276,6 +295,11 @@ _DOCUMENT = r'''<!doctype html>
       FAILED: '执行失败', SUCCEEDED_WITH_RECOVERED_ERRORS: '成功且错误已恢复',
       SUCCEEDED_WITH_UNPROVEN_RECOVERY: '成功但恢复未验证', SUCCEEDED_CLEANLY: '干净成功', UNKNOWN: '状态未知'
     };
+    const componentLayers = {
+      tool_definition: '工具接口层', tool_impl: '工具实现层', new_tool: '新工具能力层',
+      tool_merge: '工具整合层', tool_split: '工具拆分层', middleware_in_tool: '工具中间件层',
+      prompt: '提示词 / Agent 行为层'
+    };
     const taskCounts = batch.tasks.reduce((counts, task) => counts.set(String(task.task_id), (counts.get(String(task.task_id)) || 0) + 1), new Map());
     const state = {open: new Set()};
     const $ = (id) => document.getElementById(id);
@@ -324,22 +348,34 @@ _DOCUMENT = r'''<!doctype html>
 
     function renderEvidence(items) {
       const details = el('details', 'evidence');
-      const summary = el('summary', '', `查看证据（${(items || []).length}）`);
+      const summary = el('summary', '', `是根据什么修改的：证据链（${(items || []).length} 条，可展开）`);
       const list = el('div', 'evidence-list');
-      (items || []).forEach((item) => {
+      const sources = [...new Set((items || []).map((item) => item.source || 'TRACE'))];
+      list.append(el('p', 'evidence-intro', `修改依据来自 ${sources.join('、')}，先确认事实，再将根因映射到具体修改层。`));
+      (items || []).forEach((item, index) => {
         const card = el('div', 'evidence-item');
-        const line = el('div');
-        line.append(el('strong', '', `${item.source || 'TRACE'} · `), el('code', '', item.reference || '—'));
-        if (item.tool) line.append(document.createTextNode(` · ${item.tool}`));
-        card.append(line, el('div', '', item.fact || ''));
-        if (item.error) card.append(el('div', 'raw-error', item.error));
+        const source = item.source || 'TRACE';
+        const head = el('div', 'evidence-head');
+        const reference = source === 'TRACE' ? `span_id: ${item.reference || '—'}` : `${source} 引用: ${item.reference || '—'}`;
+        head.append(el('span', 'chip', `#${index + 1} · ${source}`), el('span', 'evidence-ref', reference));
+        card.append(head);
+        if (source === 'TRACE') {
+          card.append(el('div', '', item.fact || ''));
+          const raw = {span_id: item.reference || null, tool: item.tool || null, fact: item.fact || null, error: item.error || null};
+          const pre = el('pre', 'raw-trace'); pre.append(el('code', '', JSON.stringify(raw, null, 2))); card.append(pre);
+        } else {
+          const note = el('div', 'evidence-note'); note.append(el('strong', '', item.fact || '—'));
+          if (item.tool) note.append(el('div', 'refs', `来源工具：${item.tool}`));
+          if (item.error) note.append(el('div', 'raw-error', item.error));
+          card.append(note);
+        }
         list.append(card);
       });
       details.append(summary, list);
       return details;
     }
 
-    function renderFinding(item) {
+    function renderFinding(item, container) {
       const card = el('article', 'finding');
       const head = el('div', 'finding-head');
       head.append(el('h3', '', `${item.error_id || ''} · ${item.title || '未命名问题'}`), el('span', 'category', categoryLabel(item.category)));
@@ -348,26 +384,63 @@ _DOCUMENT = r'''<!doctype html>
       const cause = el('div', 'field'); cause.append(el('strong', '', '根因'), document.createTextNode(item.root_cause || '—'));
       const impact = el('div', 'field'); impact.append(el('strong', '', '影响'), document.createTextNode(item.impact || '—'));
       grid.append(cause, impact); card.append(grid);
-      if ((item.evidence || []).length) card.append(renderEvidence(item.evidence));
+      container.append(card);
       return card;
     }
 
-    function renderChange(item, task) {
-      const card = el('article', `change ${(item.priority || 'p4').toLowerCase()}`);
-      const head = el('div', 'change-head');
-      const title = el('div', 'change-title');
-      title.append(el('span', `priority ${(item.priority || 'P4').toLowerCase()}`, item.priority || 'P4'), el('h3', '', item.title || '未命名建议'));
-      head.append(title, el('span', 'component', item.component || 'unknown'));
-      card.append(head, el('p', '', item.problem || ''));
-      const grid = el('div', 'field-grid');
-      const implementation = el('div', 'field'); implementation.append(el('strong', '', '实施方式'), document.createTextNode(item.implementation || '—'));
-      const impact = el('div', 'field'); impact.append(el('strong', '', '预期收益'), document.createTextNode(item.expected_impact || '—'));
-      grid.append(implementation, impact); card.append(grid);
-      const criteria = item.acceptance_criteria || [];
-      if (criteria.length) { const field = el('div', 'field'); field.append(el('strong', '', '验收标准'), document.createTextNode(criteria.join('；'))); card.append(field); }
-      const names = (item.error_refs || []).map((ref) => { const finding = (task.error_findings || []).find((candidate) => candidate.error_id === ref); return finding ? `${ref} ${finding.title}` : ref; });
-      if (names.length) card.append(el('div', 'refs', `关联问题：${names.join('；')}`));
+    function renderBundle(change, findings) {
+      const priority = change.priority || 'P4';
+      const card = el('article', `bundle ${priority.toLowerCase()}`);
+      const head = el('div', 'bundle-head');
+      const meta = el('div', 'bundle-meta');
+      meta.append(el('span', `priority ${priority.toLowerCase()}`, priority), el('span', 'section-count', `${findings.length} 个关联问题`));
+      head.append(meta, el('span', 'component', componentLayers[change.component] || change.component || '未知层级'));
+      card.append(head);
+
+      const problemPanel = el('section', 'problem-panel');
+      problemPanel.append(el('span', 'flow-label problem', '问题是什么'));
+      findings.forEach((finding) => renderFinding(finding, problemPanel));
+      card.append(problemPanel);
+
+      const solution = el('section', 'solution-panel change');
+      solution.append(el('span', 'flow-label solution', '怎么解决'), el('h3', '', change.title || '未命名建议'));
+      if (change.problem) solution.append(el('p', '', change.problem));
+      const sources = [...new Set(findings.flatMap((finding) => (finding.evidence || []).map((item) => item.source === 'TRACE' ? `TRACE · span_id ${item.reference || '—'}` : `${item.source || 'TRACE'} · ${item.reference || '—'}`)))];
+      const context = el('div', 'change-context');
+      const sourceField = el('div', 'field'); sourceField.append(el('strong', '', '问题来源'), el('span', '', sources.join('；') || '未标注'));
+      const layerField = el('div', 'field'); layerField.append(el('strong', '', '修改层级'), el('span', '', `${componentLayers[change.component] || change.component || '未知层级'} · ${change.target || '未指定目标'}`));
+      context.append(sourceField, layerField); solution.append(context);
+      solution.append(el('p', 'implementation', `实施方案：${change.implementation || '—'}`));
+      const criteria = change.acceptance_criteria || [];
+      if (criteria.length) { const list = el('ul', 'criteria'); criteria.forEach((criterion) => list.append(el('li', '', criterion))); solution.append(list); }
+      solution.append(el('p', 'expected-impact', `预期收益：${change.expected_impact || '—'}`));
+      card.append(solution);
+
+      const evidence = [];
+      const seen = new Set();
+      findings.forEach((finding) => (finding.evidence || []).forEach((item) => {
+        const key = JSON.stringify([item.source, item.reference, item.tool, item.fact, item.error]);
+        if (!seen.has(key)) { seen.add(key); evidence.push(item); }
+      }));
+      if (evidence.length) card.append(renderEvidence(evidence));
       return card;
+    }
+
+    function buildBundles(findings, changes) {
+      const findingMap = new Map(findings.map((finding) => [finding.error_id, finding]));
+      const referenced = new Set();
+      const bundles = changes.map((change) => {
+        const linked = (change.error_refs || []).map((ref) => findingMap.get(ref)).filter(Boolean);
+        linked.forEach((finding) => referenced.add(finding.error_id));
+        return {change, findings: linked};
+      }).filter((bundle) => bundle.findings.length);
+      findings.filter((finding) => !referenced.has(finding.error_id)).forEach((finding) => {
+        bundles.push({
+          change: {priority: 'P4', component: 'unknown', target: '—', title: '尚无对应改进建议', implementation: '根据该问题补充具体改进方案。', acceptance_criteria: [], expected_impact: '待评估'},
+          findings: [finding]
+        });
+      });
+      return bundles.sort((a, b) => (priorityRank[a.change.priority] ?? 9) - (priorityRank[b.change.priority] ?? 9));
     }
 
     function renderTask(view, colorIndex) {
@@ -389,10 +462,12 @@ _DOCUMENT = r'''<!doctype html>
       if (task.judge_result_uri) links.append(link(task.judge_result_uri, 'Judge 结果 ↗'));
       if (task.trace_uri) links.append(link(task.trace_uri, 'Trace ↗'));
       summary.append(summaryText, links); detail.append(summary);
-      const columns = el('div', 'columns');
-      const left = el('section'); const leftTitle = el('h2', 'section-title'); leftTitle.append(document.createTextNode('问题'), el('span', 'section-count', `${findings.length} 项`)); const leftStack = el('div', 'stack'); findings.forEach((item) => leftStack.append(renderFinding(item))); if (!findings.length) leftStack.append(el('div', 'empty', '没有匹配的问题')); left.append(leftTitle, leftStack);
-      const right = el('section'); const rightTitle = el('h2', 'section-title'); rightTitle.append(document.createTextNode('优化建议'), el('span', 'section-count', `${changes.length} 项`)); const rightStack = el('div', 'stack'); changes.forEach((item) => rightStack.append(renderChange(item, task))); if (!changes.length) rightStack.append(el('div', 'empty', '没有匹配的建议')); right.append(rightTitle, rightStack);
-      columns.append(left, right); detail.append(columns); article.append(detail);
+      const title = el('h2', 'diagnosis-title'); title.append(document.createTextNode('问题、建议与证据链'), el('span', 'section-count', `${changes.length} 个优先改进项`));
+      const stream = el('div', 'diagnosis-stream');
+      const bundles = buildBundles(findings, changes);
+      bundles.forEach((bundle) => stream.append(renderBundle(bundle.change, bundle.findings)));
+      if (!bundles.length) stream.append(el('div', 'empty', '没有匹配的诊断内容'));
+      detail.append(title, stream); article.append(detail);
       return article;
     }
 
