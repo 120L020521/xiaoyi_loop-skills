@@ -13,7 +13,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from render_batch_report import read_batch_payload, render_batch_report
+from render_batch_report import (
+    DEFAULT_ARCHIVE_THRESHOLD,
+    read_batch_payload,
+    render_batch_report,
+)
 
 
 SCHEMA_VERSION = 3
@@ -502,8 +506,8 @@ def summarize_command(args: argparse.Namespace) -> int:
                 )
                 record["report_path"] = str(report_path)
                 record["report_uri"] = report_path.resolve().as_uri()
-                if report.get("schema_version") != 6:
-                    raise ValueError(f"HALO report schema_version must be 6: {report_path}")
+                if report.get("schema_version") != 7:
+                    raise ValueError(f"HALO report schema_version must be 7: {report_path}")
                 report_summary = report.get("report_summary")
                 if not isinstance(report_summary, dict):
                     raise ValueError(f"HALO report summary must be an object: {report_path}")
@@ -548,16 +552,18 @@ def summarize_command(args: argparse.Namespace) -> int:
         if args.output is not None
         else Path(resolved["roots"]["halo_output"]) / "batch_diagnosis_report.html"
     )
-    render_batch_report(
+    archive_paths = render_batch_report(
         output_path,
         handoff_path=handoff_path,
         diagnose_mode=resolved["diagnose_mode"],
         tasks=summary_tasks,
         errors=errors,
+        archive_threshold=getattr(args, "archive_threshold", DEFAULT_ARCHIVE_THRESHOLD),
     )
     print(json.dumps({
         "status": "ok" if not errors else "partial",
         "html_report": str(output_path),
+        "html_archives_created": [str(path) for path in archive_paths],
         "totals": {
             "requested": len(resolved["tasks"]),
             "eligible": len(resolved["eligible_task_ids"]),
@@ -889,6 +895,7 @@ state_file = "artifacts/custom_state.json"
                     "reference": "span-1",
                     "tool": "bash",
                     "fact": "工具返回非零状态。",
+                    "raw_log_excerpt": "exit code 1",
                     "error": "exit code 1",
                 }],
                 "root_cause": "测试环境与工具参数不兼容。",
@@ -907,7 +914,7 @@ state_file = "artifacts/custom_state.json"
                 "expected_impact": "避免无效工具调用。",
             }]
             _write_json(report_path, {
-                "schema_version": 6,
+                "schema_version": 7,
                 "report_summary": {
                     "task_id": f"task{task_id}",
                     "task": f"测试任务 {task_id}",
@@ -944,6 +951,7 @@ state_file = "artifacts/custom_state.json"
             stale_status = summarize_command(argparse.Namespace(
                 handoff=handoff_path,
                 output=summary_path,
+                archive_threshold=DEFAULT_ARCHIVE_THRESHOLD,
             ))
         stale_summary = json.loads(stale_stdout.getvalue())
         if stale_status != 0 or stale_summary["totals"]["failed"] != 1:
@@ -951,7 +959,7 @@ state_file = "artifacts/custom_state.json"
         checks += 1
 
         legacy_html = summary_path.read_text(encoding="utf-8").replace(
-            '"payload_schema_version":1,',
+            '"payload_schema_version":2,',
             "",
             1,
         )
@@ -962,6 +970,7 @@ state_file = "artifacts/custom_state.json"
             summary_status = summarize_command(argparse.Namespace(
                 handoff=handoff_path,
                 output=summary_path,
+                archive_threshold=DEFAULT_ARCHIVE_THRESHOLD,
             ))
         if summary_status != 0:
             raise AssertionError("summary command failed")
@@ -984,6 +993,17 @@ state_file = "artifacts/custom_state.json"
             or "task color-" not in html
             or "task-nav-list" not in html
             or "filter-toggle" not in html
+            or "问题是什么" not in html
+            or "怎么解决" not in html
+            or "是根据什么修改的" not in html
+            or "span_id:" not in html
+            or "raw-trace" not in html
+            or "关键日志原文" not in html
+            or "evidence-context" not in html
+            or "evidence-index" not in html
+            or "log-block" not in html
+            or "修改依据来自" in html
+            or "const raw =" in html
             or "__BATCH_DATA__" in html
         ):
             raise AssertionError("fixed-format HTML report is incomplete")
@@ -996,7 +1016,7 @@ state_file = "artifacts/custom_state.json"
         if task14 is None:
             raise AssertionError(f"cumulative HTML lost task 14: {cumulative_ids}")
         if (
-            cumulative["payload_schema_version"] != 1
+            cumulative["payload_schema_version"] != 2
             or
             cumulative["batch_runs"] != 2
             or len(cumulative_ids) != len(set(cumulative_ids))
@@ -1060,6 +1080,32 @@ state_file = "artifacts/custom_state.json"
             raise AssertionError("Trace fingerprint did not distinguish reused Task IDs")
         checks += 1
 
+        render_batch_report(
+            summary_path,
+            handoff_path=handoff_path,
+            diagnose_mode="all",
+            tasks=[{
+                **alternate_task14,
+                "task_id": 100,
+                "trace_fingerprint": "10" * 32,
+            }],
+            errors=[],
+            archive_threshold=2,
+        )
+        cumulative = read_batch_payload(summary_path)
+        archive_files = list(summary_path.parent.glob(
+            f"{summary_path.stem}.archive-*{summary_path.suffix}"
+        ))
+        if (
+            cumulative is None
+            or len(cumulative["tasks"]) != 2
+            or not cumulative.get("archives")
+            or not archive_files
+            or read_batch_payload(archive_files[0]) is None
+        ):
+            raise AssertionError("HTML archive threshold did not preserve overflow Tasks")
+        checks += 1
+
     print(json.dumps({"status": "ok", "checks": checks}, ensure_ascii=False))
     return 0
 
@@ -1115,6 +1161,12 @@ def build_parser() -> argparse.ArgumentParser:
     summarize = subparsers.add_parser("summarize", help="Render the combined Judge/HALO HTML report")
     summarize.add_argument("handoff", type=Path)
     summarize.add_argument("--output", type=Path)
+    summarize.add_argument(
+        "--archive-threshold",
+        type=int,
+        default=DEFAULT_ARCHIVE_THRESHOLD,
+        help="Keep at most this many Trace-identified Tasks in the main HTML; 0 disables archiving",
+    )
     summarize.set_defaults(func=summarize_command)
 
     test = subparsers.add_parser("self-test", help="Run a standard-library smoke test")

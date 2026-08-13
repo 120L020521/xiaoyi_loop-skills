@@ -301,7 +301,7 @@ task                  ← task 或 description
 expected_output_files ← output_files 或 expected_output_files
 ```
 
-每个 Trace 只能构建一次 Prompt。诊断必须使用该 Prompt，生成 schema-v6 UTF-8
+每个 Trace 只能构建一次 Prompt。诊断必须使用该 Prompt，生成 schema-v7 UTF-8
 JSON 报告，并反复执行以下校验直到成功：
 
 ```powershell
@@ -309,8 +309,9 @@ python -m halo_rlm.agent_cli validate-report "<manifest.report_path>" `
   --manifest "<manifest.manifest_path>"
 ```
 
-校验成功时必须返回 `validation=complete`。HALO 在同一入口中完成 schema-v6
-结构、manifest 路径绑定、产物新鲜度以及报告 Trace/Span 引用真实性校验；只诊断
+校验成功时必须返回 `validation=complete`。HALO 在同一入口中完成 schema-v7
+结构、manifest 路径绑定、产物新鲜度、报告 Trace/Span 引用真实性及关键日志原文
+与对应 Span 的逐字匹配校验；只诊断
 而不经过批量编排时也执行相同的完整校验。
 
 默认不传 `--surface`，HALO 使用内置的逻辑目标名白名单；不需要准备任何 Surface
@@ -319,7 +320,7 @@ python -m halo_rlm.agent_cli validate-report "<manifest.report_path>" `
 `diagnosis` 和 `proposed_changes` 下的人类可读内容使用简体中文，JSON 字段名、枚举、
 ID、时间戳、路径和原始证据保持原样。
 
-### HALO 报告结构（schema v6）
+### HALO 报告结构（schema v7）
 
 `halo_report.json` 顶层固定为四个字段：
 
@@ -362,6 +363,7 @@ diagnosis
       reference
       tool
       fact
+      raw_log_excerpt
       error
     root_cause
     recovery_status
@@ -401,13 +403,20 @@ proposed_changes[]
 ```
 
 错误和建议使用 `P0` 至 `P4` 表示报告内的相对优先顺序；Evidence 不设置优先级或独立
-ID，通过 `source` 和 `reference` 定位。`source` 可取 `TRACE`、`TASK`、`JUDGE`、
+ID，通过 `source` 和 `reference` 定位。整份报告通过 `report_summary.trace_ids`
+提供 TRACE 锚点；单个错误可以只由 Judge、源文件或输出文件证据证明。使用 TRACE
+evidence 时，
+其 `raw_log_excerpt` 保存对应 Span 中最关键的日志原文；非 TRACE evidence 使用空字符串。
+`source` 可取 `TRACE`、`TASK`、`JUDGE`、
 `SOURCE_FILE` 或 `OUTPUT_FILE`；`recovery_status` 可取 `RECOVERED`、`UNRECOVERED`、
 `UNPROVEN` 或 `NOT_APPLICABLE`。
 
 报告不包含 `task_and_output_files_assessment`。无证据支持的错误或建议使用空数组，不得
 臆造；`FAILED` 报告必须提供 3 至 5 条建议，其他执行分类允许 0 至 5 条。每条建议的
 `error_refs` 必须引用报告中真实存在的错误 ID。
+
+同一个错误 ID 可以被多条建议引用，用于表达不同修改层级或不同适用条件下的解决方向。
+互斥方案需要在建议中明确适用条件，不使用没有证据支持的 “50%/50%” 概率。
 
 ## 3. 使用 run-xiaoyi-halo-loop
 
@@ -492,8 +501,12 @@ python run-xiaoyi-halo-loop/scripts/handoff.py summarize `
 输出：
 
 ```text
-<resolved_halo_output>/batch_summary.json
+<resolved_halo_output>/batch_diagnosis_report.html
 ```
+
+主 HTML 默认保留最新 500 条 Trace 身份记录。超过阈值时，较旧记录会写入同目录的
+`batch_diagnosis_report.archive-<UTC>.html`，并由主报告提供链接。需要调整阈值时使用
+`summarize --archive-threshold <N>`；`0` 表示关闭归档。
 
 ## 从已有 handoff 继续
 

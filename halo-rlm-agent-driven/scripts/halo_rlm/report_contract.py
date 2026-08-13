@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Iterable
 
-REPORT_SCHEMA_VERSION = 6
+REPORT_SCHEMA_VERSION = 7
 REQUIRED_TOP_LEVEL_FIELDS = (
     "schema_version",
     "report_summary",
@@ -47,7 +47,14 @@ ERROR_FIELDS = (
     "recovery_status",
     "impact",
 )
-EVIDENCE_FIELDS = ("source", "reference", "tool", "fact", "error")
+EVIDENCE_FIELDS = (
+    "source",
+    "reference",
+    "tool",
+    "fact",
+    "raw_log_excerpt",
+    "error",
+)
 PROPOSED_CHANGE_FIELDS = (
     "priority",
     "component",
@@ -60,14 +67,27 @@ PROPOSED_CHANGE_FIELDS = (
     "expected_impact",
 )
 REPORT_STRUCTURE_GUIDANCE = (
-    "Use exactly the shown v6 fields and nesting; do not add ad-hoc fields. Group each "
+    "Use exactly the shown v7 fields and nesting; do not add ad-hoc fields. Group each "
     "distinct material problem into one diagnosis.error_findings item. Do not repeat the same "
     "spans in a generic tool-failure finding and a second semantic finding; split findings "
     "by root cause. Summarize the dominant root cause briefly in primary_failure_mode. "
-    "Use P0-P4 only "
-    "on error_findings and proposed_changes as relative ranking labels. Evidence "
+    "Use this fixed priority policy on error_findings and proposed_changes: P0 directly "
+    "causes a missing/materially wrong core output or false-success decision; P1 blocks "
+    "reliable execution/recovery/validation, violates an important required constraint, "
+    "or creates major correctness risk; P2 materially wastes calls/retries/time/context "
+    "or causes recurring stability problems while preserving the result; P3 is a limited "
+    "robustness or maintainability issue; P4 is optional polish or low-benefit improvement. "
+    "Prioritize trace-supported impact and urgency, not category names or error counts. "
+    "A proposed change may combine errors only when one implementation at one layer "
+    "genuinely resolves all of them; otherwise split it. Evidence "
     "has no id or priority: use source plus reference to identify TRACE spans, TASK/JUDGE "
-    "items, or source/output files. Preserve raw error text; write error titles, summaries, "
+    "items, or source/output files. For TRACE evidence, copy a verbatim key log excerpt "
+    "with enough contiguous context to show the operation, relevant input/result, and "
+    "failure (prefer the triggering call plus decisive output/status/exception, typically "
+    "3-20 relevant lines when available) into raw_log_excerpt. report_summary.trace_ids is the "
+    "report-level TRACE anchor; an individual error may instead be proved entirely by TASK, "
+    "JUDGE, SOURCE_FILE, or OUTPUT_FILE evidence. Use an empty raw_log_excerpt for non-TRACE evidence. "
+    "Preserve raw error text; write error titles, summaries, "
     "facts, root causes, impacts, change titles/problems/implementations/acceptance criteria/"
     "impacts in Simplified Chinese. Keep JSON keys, enums, priorities, task/trace/span ids, "
     "component/target values, tool names, paths, filenames, and raw errors unchanged. Every "
@@ -76,7 +96,9 @@ REPORT_STRUCTURE_GUIDANCE = (
     "Copy expected_output_files unchanged when supplied and omit it when missing. Include "
     "judge_summary only when Judge context exists. Use [] when no error findings or changes are "
     "supported. FAILED reports require exactly 3-5 proposed_changes; every other execution "
-    "classification allows 0-5."
+    "classification allows 0-5. One error id may be referenced by multiple changes when "
+    "they are genuinely distinct implementation directions; state applicability conditions "
+    "for mutually exclusive alternatives and never invent probability percentages."
 )
 
 
@@ -86,7 +108,7 @@ def build_report(
     proposed_changes: list[dict[str, Any]] | None = None,
     **diagnosis: Any,
 ) -> dict[str, Any]:
-    """Build a report with canonical v6 nesting."""
+    """Build a report with canonical v7 nesting."""
     diagnosis = dict(diagnosis)
     diagnosis.setdefault("error_findings", [])
     return {
@@ -135,6 +157,7 @@ def render_report_example(
                         "reference": "...",
                         "tool": "bash",
                         "fact": "工具调用返回失败状态。",
+                        "raw_log_excerpt": "status=STATUS_CODE_ERROR\nModuleNotFoundError: No module named 'pandas'",
                         "error": "raw error",
                     }
                 ],
@@ -266,6 +289,15 @@ def _validate_evidence(value: Any, error_index: int, evidence_index: int) -> Non
     _require_string(item["reference"], f"{path}.reference", allow_empty=False)
     _require_string(item["tool"], f"{path}.tool")
     _require_chinese_text(item["fact"], f"{path}.fact")
+    _require_string(item["raw_log_excerpt"], f"{path}.raw_log_excerpt")
+    if item["source"] == "TRACE" and not item["raw_log_excerpt"].strip():
+        raise ValueError(
+            f"model diagnostic report {path}.raw_log_excerpt must be non-empty for TRACE evidence"
+        )
+    if item["source"] != "TRACE" and item["raw_log_excerpt"]:
+        raise ValueError(
+            f"model diagnostic report {path}.raw_log_excerpt must be empty for non-TRACE evidence"
+        )
     _require_string(item["error"], f"{path}.error")
 
 

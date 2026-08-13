@@ -151,7 +151,7 @@ continue the queue. If nested investigator capacity is unavailable, let that
 HALO worker use the HALO skill's bounded single-agent fallback. The parent must
 not run `validate-report`; report acceptance belongs entirely to HALO. Let the
 final renderer perform only current-batch freshness, manifest/source/report
-binding, and HALO v6 structure checks.
+binding, and HALO v7 structure checks.
 
 ### 5. Render the batch HTML report
 
@@ -177,9 +177,16 @@ that are not in the current batch, append new Trace fingerprints, and replace
 an existing Trace fingerprint with its latest result. Compute the identity as
 Task ID plus the source Trace's SHA-256, so reused Task IDs do not overwrite
 different runs and identical fixture traces from different Tasks stay distinct.
-Accept and migrate the previous unversioned HTML payload, then write payload
-schema version 1. Refuse to overwrite an unrecognized HTML file and update a
+Accept and migrate the previous unversioned or version 1 HTML payload, then
+write payload schema version 2. Refuse to overwrite an unrecognized HTML file and update a
 recognized report through a temporary file plus atomic replacement.
+
+Keep at most 500 Trace-identified Task records in the main HTML by default.
+When this threshold is exceeded, move the oldest overflow records into
+self-contained `batch_diagnosis_report.archive-<UTC>.html` files in the same
+directory and link them from the main report. Override the limit with
+`summarize --archive-threshold <N>`; use `0` only when the user explicitly asks
+to disable archiving.
 
 The self-contained report starts with every Task folded, keeps the filter bar
 sticky, provides a Task directory with jump links, and lets mobile users
@@ -193,10 +200,21 @@ problem/change columns. Group each change with all errors referenced by its
 `error_refs`, and present it in this order: priority, “问题是什么”, “怎么解决”,
 then a folded “是根据什么修改的” evidence chain. Show the change's problem
 sources (including full Trace `span_id` values), target component layer and
-target file. In expanded evidence, render Trace records as readable JSON code
-blocks and render Judge/source/output evidence as concise evidence notes. Keep
-the palette restrained and use color only to distinguish priorities, problems,
-solutions, evidence links, and expected impact.
+target file. Give every problem its own restrained surface, similar to the
+root-cause fields, so adjacent problems remain visually distinct without adding
+colored rails to every nested box. In expanded evidence, make `#1`, `#2`, and
+later evidence labels prominent; group the source, full `span_id`, fact, tool,
+and error metadata in one softly colored context surface. Render
+Judge/source/output evidence as concise notes. Do not add a generic sentence
+listing evidence source types.
+Display every TRACE evidence item's `raw_log_excerpt` verbatim in a separate,
+uncolored log section immediately below that context surface. Do not repeat the
+same metadata as a second JSON code block. Preserve enough excerpt context to
+show the operation, relevant input/result, and exact point of failure, so a
+reader can understand the problem without opening the raw Trace. Keep the
+palette restrained and use color only to distinguish priorities, problems,
+solutions, evidence headers, and expected impact. One error may appear under multiple distinct changes when its
+`error_refs` intentionally support different modification directions.
 When one Task fails or lacks a trace, render the remaining valid Tasks and
 record the failed or skipped Task in the same HTML.
 

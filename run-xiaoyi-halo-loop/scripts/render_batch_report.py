@@ -10,7 +10,8 @@ from typing import Any
 
 
 _PAYLOAD_PREFIX = "const batch = "
-_PAYLOAD_SCHEMA_VERSION = 1
+_PAYLOAD_SCHEMA_VERSION = 2
+DEFAULT_ARCHIVE_THRESHOLD = 500
 
 
 def read_batch_payload(path: Path) -> dict[str, Any] | None:
@@ -32,7 +33,7 @@ def read_batch_payload(path: Path) -> dict[str, Any] | None:
     if not isinstance(payload, dict) or not isinstance(payload.get("tasks"), list):
         raise ValueError(f"existing HALO batch report payload has an invalid structure: {path}")
     version = payload.get("payload_schema_version")
-    if version not in (None, _PAYLOAD_SCHEMA_VERSION):
+    if version not in (None, 1, _PAYLOAD_SCHEMA_VERSION):
         raise ValueError(f"unsupported HALO batch report payload version {version}: {path}")
     return payload
 
@@ -49,47 +50,20 @@ def _merge_tasks(
     current_tasks: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     current_by_identity = {_task_identity(task): task for task in current_tasks}
-    current_legacy_by_task_id = {
-        str(task.get("task_id")): task for task in current_tasks
-    }
+    current_task_ids = {str(task.get("task_id")) for task in current_tasks}
     merged: list[dict[str, Any]] = []
-    seen: set[str] = set()
     for task in existing_tasks:
         task_key = _task_identity(task)
-        replacement = current_by_identity.get(task_key)
-        if replacement is None and task_key.startswith("legacy-task:"):
-            replacement = current_legacy_by_task_id.get(str(task.get("task_id")))
-        selected = replacement or task
-        merged.append(selected)
-        seen.add(_task_identity(selected))
-    for task in current_tasks:
-        task_key = _task_identity(task)
-        if task_key not in seen:
-            merged.append(task)
-            seen.add(task_key)
+        if task_key in current_by_identity:
+            continue
+        if task_key.startswith("legacy-task:") and str(task.get("task_id")) in current_task_ids:
+            continue
+        merged.append(task)
+    merged.extend(current_tasks)
     return merged
 
 
-def render_batch_report(
-    output_path: Path,
-    *,
-    handoff_path: Path,
-    diagnose_mode: str,
-    tasks: list[dict[str, Any]],
-    errors: list[str],
-) -> None:
-    existing = read_batch_payload(output_path)
-    existing_tasks = existing["tasks"] if existing is not None else []
-    batch_runs = existing.get("batch_runs", 1) + 1 if existing is not None else 1
-    payload = {
-        "payload_schema_version": _PAYLOAD_SCHEMA_VERSION,
-        "handoff": str(handoff_path),
-        "diagnose_mode": diagnose_mode,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "batch_runs": batch_runs,
-        "tasks": _merge_tasks(existing_tasks, tasks),
-        "errors": errors,
-    }
+def _write_payload(output_path: Path, payload: dict[str, Any]) -> None:
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     encoded = encoded.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     document = _DOCUMENT.replace("__BATCH_DATA__", encoded)
@@ -101,6 +75,75 @@ def render_batch_report(
     finally:
         if temporary_path.exists():
             temporary_path.unlink()
+
+
+def _next_archive_path(output_path: Path, generated_at: datetime) -> Path:
+    stamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
+    candidate = output_path.with_name(f"{output_path.stem}.archive-{stamp}{output_path.suffix}")
+    index = 2
+    while candidate.exists():
+        candidate = output_path.with_name(
+            f"{output_path.stem}.archive-{stamp}-{index}{output_path.suffix}"
+        )
+        index += 1
+    return candidate
+
+
+def render_batch_report(
+    output_path: Path,
+    *,
+    handoff_path: Path,
+    diagnose_mode: str,
+    tasks: list[dict[str, Any]],
+    errors: list[str],
+    archive_threshold: int = DEFAULT_ARCHIVE_THRESHOLD,
+) -> list[Path]:
+    if archive_threshold < 0:
+        raise ValueError("archive_threshold must be >= 0")
+    existing = read_batch_payload(output_path)
+    existing_tasks = existing["tasks"] if existing is not None else []
+    batch_runs = existing.get("batch_runs", 1) + 1 if existing is not None else 1
+    generated_at = datetime.now(timezone.utc)
+    merged_tasks = _merge_tasks(existing_tasks, tasks)
+    archive_records = list(existing.get("archives", [])) if existing is not None else []
+    archive_paths: list[Path] = []
+    if archive_threshold and len(merged_tasks) > archive_threshold:
+        archived_tasks = merged_tasks[:-archive_threshold]
+        merged_tasks = merged_tasks[-archive_threshold:]
+        for offset in range(0, len(archived_tasks), archive_threshold):
+            archive_tasks = archived_tasks[offset:offset + archive_threshold]
+            archive_path = _next_archive_path(output_path, generated_at)
+            archive_payload = {
+                "payload_schema_version": _PAYLOAD_SCHEMA_VERSION,
+                "handoff": str(handoff_path),
+                "diagnose_mode": diagnose_mode,
+                "generated_at": generated_at.isoformat(),
+                "batch_runs": batch_runs,
+                "tasks": archive_tasks,
+                "errors": [],
+                "archives": [],
+                "is_archive": True,
+            }
+            _write_payload(archive_path, archive_payload)
+            archive_paths.append(archive_path)
+            archive_records.append({
+                "file": archive_path.name,
+                "task_count": len(archive_tasks),
+                "created_at": generated_at.isoformat(),
+            })
+    payload = {
+        "payload_schema_version": _PAYLOAD_SCHEMA_VERSION,
+        "handoff": str(handoff_path),
+        "diagnose_mode": diagnose_mode,
+        "generated_at": generated_at.isoformat(),
+        "batch_runs": batch_runs,
+        "tasks": merged_tasks,
+        "errors": errors,
+        "archives": archive_records,
+        "is_archive": False,
+    }
+    _write_payload(output_path, payload)
+    return archive_paths
 
 
 _DOCUMENT = r'''<!doctype html>
@@ -204,13 +247,14 @@ _DOCUMENT = r'''<!doctype html>
     .flow-label { color: var(--muted); display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
     .flow-label.problem { color: var(--red); }
     .flow-label.solution { color: var(--blue); }
-    .problem-panel { border-bottom: 1px solid var(--border); padding: 13px; }
-    .finding + .finding { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+    .problem-panel { background: color-mix(in srgb, var(--red-soft) 16%, var(--surface)); border-bottom: 2px solid var(--border); padding: 12px 16px; }
+    .finding { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+    .finding + .finding { margin-top: 8px; }
     .finding h3, .change h3 { margin: 0; font-size: 15px; font-weight: 600; }
     .finding h3 { color: var(--red); }
     .finding p, .change p { margin: 7px 0 0; }
     .category { background: var(--red-soft); border: 1px solid color-mix(in srgb, var(--red) 22%, var(--border)); color: var(--red); border-radius: 4px; font-size: 12px; padding: 2px 6px; white-space: nowrap; }
-    .solution-panel { background: color-mix(in srgb, var(--blue-soft) 35%, var(--surface)); padding: 13px; }
+    .solution-panel { background: color-mix(in srgb, var(--blue-soft) 52%, var(--surface)); border-bottom: 2px solid var(--border); padding: 12px 16px; }
     .solution-panel h3 { color: var(--blue); }
     .priority { border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; padding: 3px 6px; }
     .priority.p0 { background: var(--red); }
@@ -219,8 +263,8 @@ _DOCUMENT = r'''<!doctype html>
     .priority.p3 { background: var(--blue); }
     .priority.p4 { background: var(--purple); }
     .component { color: var(--purple); background: var(--purple-soft); border-radius: 4px; font-size: 12px; padding: 3px 7px; white-space: nowrap; }
-    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 10px; }
-    .field { background: var(--surface-soft); border-left: 2px solid var(--border); color: var(--text); font-size: 13px; padding: 8px 10px; }
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 7px; }
+    .field { background: var(--surface-soft); border-top: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 13px; padding: 7px 9px; }
     .field strong { color: var(--text); display: block; font-size: 12px; margin-bottom: 2px; }
     .change-context { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 10px 0; }
     .change-context .field:first-child span { color: var(--purple); }
@@ -229,29 +273,44 @@ _DOCUMENT = r'''<!doctype html>
     .criteria { display: grid; gap: 4px; list-style: none; margin: 9px 0 0; padding: 0; }
     .criteria li::before { color: var(--green); content: "✓"; margin-right: 7px; }
     .expected-impact { color: var(--green); }
-    .evidence { border-top: 1px solid var(--border); }
-    .evidence summary { color: var(--blue); cursor: pointer; font-size: 13px; font-weight: 600; padding: 11px 13px; }
-    .evidence summary:hover { background: var(--blue-soft); }
-    .evidence-list { display: grid; gap: 12px; padding: 10px 13px 13px; }
-    .evidence-intro { border-left: 2px solid var(--yellow); margin: 0; padding-left: 9px; }
-    .evidence-item { border-top: 1px solid var(--border); display: grid; gap: 6px; padding-top: 11px; font-size: 13px; }
+    .evidence { background: color-mix(in srgb, var(--purple-soft) 20%, var(--surface-soft)); }
+    .evidence summary { color: var(--purple); cursor: pointer; font-size: 13px; font-weight: 600; padding: 10px 16px; }
+    .evidence summary:hover { background: var(--purple-soft); }
+    .evidence[open] summary { background: color-mix(in srgb, var(--purple-soft) 55%, var(--surface)); border-bottom: 2px solid var(--border); }
+    .evidence-list { display: grid; gap: 9px; padding: 11px 16px 14px; }
+    .evidence-item { border-bottom: 1px solid var(--border); display: grid; gap: 8px; padding-bottom: 10px; font-size: 13px; }
+    .evidence-item:last-child { border-bottom: 0; }
+    .evidence-context { background: color-mix(in srgb, var(--purple-soft) 38%, var(--surface)); border: 1px solid color-mix(in srgb, var(--purple) 16%, var(--border)); border-radius: 5px; display: grid; gap: 6px; padding: 9px 10px; }
+    .evidence-context > .evidence-head { border-bottom: 1px solid color-mix(in srgb, var(--purple) 15%, var(--border)); padding-bottom: 7px; }
+    .evidence-index { background: var(--purple); border-radius: 4px; color: var(--surface); display: inline-block; font-weight: 600; min-width: 32px; padding: 3px 7px; text-align: center; }
     .evidence-ref { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; overflow-wrap: anywhere; }
-    .evidence-note { border-left: 2px solid var(--border); padding-left: 9px; }
-    .raw-trace { background: light-dark(#1d2430, #0d1016); border-radius: 4px; color: light-dark(#eaf0fa, #dce5f5); font-size: 12px; line-height: 1.5; margin: 2px 0 0; overflow-x: auto; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; }
+    .evidence-note { display: grid; gap: 4px; }
+    .log-block { background: transparent; display: grid; gap: 5px; }
+    .log-label { color: var(--orange); font-weight: 600; }
+    .evidence-meta { border-bottom: 1px dashed var(--border); display: grid; gap: 6px 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 2px 0 8px; }
+    .evidence-meta-field { display: grid; gap: 2px; min-width: 0; }
+    .evidence-meta-field.wide { grid-column: 1 / -1; }
+    .evidence-meta-label { color: var(--muted); font-size: 12px; }
+    .evidence-meta-value { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .raw-trace { background: light-dark(#1d2430, #0d1016); border-radius: 4px; color: light-dark(#eaf0fa, #dce5f5); font-size: 12px; line-height: 1.5; margin: 2px 0 0; overflow-x: auto; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
     .raw-trace code { color: inherit; }
     code { color: var(--purple); overflow-wrap: anywhere; }
     .raw-error { color: var(--red); margin-top: 4px; overflow-wrap: anywhere; }
     .empty { color: var(--muted); padding: 18px; text-align: center; }
     .batch-errors { margin-top: 14px; background: var(--red-soft); color: var(--red); border-radius: 11px; padding: 12px 14px; }
     .batch-errors ul { margin: 7px 0 0; padding-left: 20px; }
+    .archive-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+    .archive-links a, .archive-links span { color: var(--muted); font-size: 13px; }
+    .archive-links a { color: var(--blue); text-decoration: none; }
+    .archive-links a:hover { text-decoration: underline; }
     @media (max-width: 880px) { .filters { grid-template-columns: repeat(3, 1fr); } .report-layout { grid-template-columns: 1fr; } .task-nav { position: static; max-height: none; } .task-nav-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-    @media (max-width: 620px) { .shell { width: min(100% - 16px, 1180px); margin-top: 8px; } .hero-top, .summary { grid-template-columns: 1fr; display: grid; } .metrics { grid-template-columns: repeat(2, 1fr); } .filter-toggle { display: block; } .filter-dock.filters-collapsed .filters { display: none; } .filters { grid-template-columns: repeat(2, 1fr); margin-top: 10px; } .task-nav-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .task-toggle { grid-template-columns: 1fr; } .task-meta { justify-content: flex-start; } .links { justify-content: flex-start; } .field-grid, .change-context { grid-template-columns: 1fr; } }
+    @media (max-width: 620px) { .shell { width: min(100% - 16px, 1180px); margin-top: 8px; } .hero-top, .summary { grid-template-columns: 1fr; display: grid; } .metrics { grid-template-columns: repeat(2, 1fr); } .filter-toggle { display: block; } .filter-dock.filters-collapsed .filters { display: none; } .filters { grid-template-columns: repeat(2, 1fr); margin-top: 10px; } .task-nav-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .task-toggle { grid-template-columns: 1fr; } .task-meta { justify-content: flex-start; } .links { justify-content: flex-start; } .field-grid, .change-context, .evidence-meta { grid-template-columns: 1fr; } .evidence-meta-field.wide { grid-column: auto; } }
   </style>
 </head>
 <body>
   <main class="shell">
     <section class="hero">
-      <div class="hero-top"><div><h1>小艺批次诊断报告</h1><p class="subtitle" id="subtitle"></p></div><span class="batch-chip" id="mode-chip"></span></div>
+      <div class="hero-top"><div><h1>小艺批次诊断报告</h1><p class="subtitle" id="subtitle"></p><div class="archive-links" id="archive-links"></div></div><span class="batch-chip" id="mode-chip"></span></div>
       <div class="metrics" id="metrics"></div>
     </section>
     <section class="filter-dock" aria-label="批次筛选">
@@ -350,24 +409,42 @@ _DOCUMENT = r'''<!doctype html>
       const details = el('details', 'evidence');
       const summary = el('summary', '', `是根据什么修改的：证据链（${(items || []).length} 条，可展开）`);
       const list = el('div', 'evidence-list');
-      const sources = [...new Set((items || []).map((item) => item.source || 'TRACE'))];
-      list.append(el('p', 'evidence-intro', `修改依据来自 ${sources.join('、')}，先确认事实，再将根因映射到具体修改层。`));
       (items || []).forEach((item, index) => {
         const card = el('div', 'evidence-item');
+        const context = el('div', 'evidence-context');
         const source = item.source || 'TRACE';
         const head = el('div', 'evidence-head');
         const reference = source === 'TRACE' ? `span_id: ${item.reference || '—'}` : `${source} 引用: ${item.reference || '—'}`;
-        head.append(el('span', 'chip', `#${index + 1} · ${source}`), el('span', 'evidence-ref', reference));
-        card.append(head);
+        const sourceGroup = el('div', 'bundle-meta');
+        sourceGroup.append(el('span', 'evidence-index', `#${index + 1}`), el('span', 'chip', source));
+        head.append(sourceGroup, el('span', 'evidence-ref', reference));
+        context.append(head);
         if (source === 'TRACE') {
-          card.append(el('div', '', item.fact || ''));
-          const raw = {span_id: item.reference || null, tool: item.tool || null, fact: item.fact || null, error: item.error || null};
-          const pre = el('pre', 'raw-trace'); pre.append(el('code', '', JSON.stringify(raw, null, 2))); card.append(pre);
+          context.append(el('div', '', item.fact || ''));
+          const metadata = el('div', 'evidence-meta');
+          const metadataValues = [
+            ['span_id', item.reference || '—', true],
+            ['tool', item.tool || '—'],
+            ['error', item.error || '—']
+          ];
+          metadataValues.forEach(([label, value, wide]) => {
+            const field = el('div', `evidence-meta-field${wide ? ' wide' : ''}`);
+            field.append(el('span', 'evidence-meta-label', label), el('span', 'evidence-meta-value', value));
+            metadata.append(field);
+          });
+          context.append(metadata);
+          card.append(context);
+          if (item.raw_log_excerpt) {
+            const excerpt = el('div', 'log-block');
+            excerpt.append(el('strong', 'log-label', '关键日志原文'));
+            const pre = el('pre', 'raw-trace'); pre.append(el('code', '', item.raw_log_excerpt));
+            excerpt.append(pre); card.append(excerpt);
+          }
         } else {
           const note = el('div', 'evidence-note'); note.append(el('strong', '', item.fact || '—'));
           if (item.tool) note.append(el('div', 'refs', `来源工具：${item.tool}`));
           if (item.error) note.append(el('div', 'raw-error', item.error));
-          card.append(note);
+          context.append(note); card.append(context);
         }
         list.append(card);
       });
@@ -419,7 +496,7 @@ _DOCUMENT = r'''<!doctype html>
       const evidence = [];
       const seen = new Set();
       findings.forEach((finding) => (finding.evidence || []).forEach((item) => {
-        const key = JSON.stringify([item.source, item.reference, item.tool, item.fact, item.error]);
+        const key = JSON.stringify([item.source, item.reference, item.tool, item.fact, item.raw_log_excerpt, item.error]);
         if (!seen.has(key)) { seen.add(key); evidence.push(item); }
       }));
       if (evidence.length) card.append(renderEvidence(evidence));
@@ -494,9 +571,22 @@ _DOCUMENT = r'''<!doctype html>
       const changes = batch.tasks.reduce((sum, task) => sum + mergeChanges(task.proposed_changes || []).length, 0);
       const values = [['批次任务', batch.tasks.length], ['完成诊断', reported], ['Judge 未通过', failedJudge], ['优化建议', changes]];
       const root = $('metrics'); values.forEach(([label, value]) => { const card = el('div', 'metric'); card.append(el('span', 'metric-label', label), el('span', 'metric-value', String(value))); root.append(card); });
-      $('subtitle').textContent = `累计 ${batch.batch_runs || 1} 次批跑 · 基于 Judge、Trace 与 HALO v6 报告 · ${new Date(batch.generated_at).toLocaleString('zh-CN')}`;
+      $('subtitle').textContent = `累计 ${batch.batch_runs || 1} 次批跑 · 基于 Judge、Trace 与 HALO v7 报告 · ${new Date(batch.generated_at).toLocaleString('zh-CN')}`;
       const modeText = batch.diagnose_mode === 'failed' ? '仅诊断错误任务' : '诊断全部 Trace';
       $('mode-chip').textContent = `${batch.tasks.length} 个累计任务 · ${modeText}`;
+    }
+
+    function renderArchives() {
+      const root = $('archive-links');
+      if (batch.is_archive) {
+        root.append(el('span', '', '当前为历史归档报告'));
+        return;
+      }
+      (batch.archives || []).forEach((archive, index) => {
+        const link = el('a', '', `历史归档 ${index + 1}（${archive.task_count} 个任务）`);
+        link.href = archive.file;
+        root.append(link);
+      });
     }
 
     function render() {
@@ -519,7 +609,7 @@ _DOCUMENT = r'''<!doctype html>
       const box = el('div', 'batch-errors'); box.append(el('strong', '', `未生成有效诊断的任务（${batch.errors.length}）`)); const list = el('ul'); batch.errors.forEach((message) => { const item = el('li', '', message); list.append(item); }); box.append(list); $('batch-errors').append(box);
     }
 
-    populate(); renderMetrics(); renderBatchErrors(); render();
+    populate(); renderMetrics(); renderArchives(); renderBatchErrors(); render();
   })();
   </script>
 </body>

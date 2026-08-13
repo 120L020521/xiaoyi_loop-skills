@@ -16,6 +16,20 @@ from .better_harness import (
 from .report_contract import normalize_json_report
 
 
+def _span_verbatim_values(value: Any) -> list[str]:
+    values: list[str] = []
+    if isinstance(value, str):
+        values.append(value)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            values.append(str(key))
+            values.extend(_span_verbatim_values(item))
+    elif isinstance(value, list):
+        for item in value:
+            values.extend(_span_verbatim_values(item))
+    return values
+
+
 def _load_object(path: str | None, label: str) -> dict[str, Any]:
     if path is None:
         return {}
@@ -50,10 +64,13 @@ def _require_file(path: Path, label: str) -> None:
         raise ValueError(f"{label} is empty: {path}")
 
 
-def _trace_references(trace_path: Path) -> tuple[set[str], set[tuple[str, str]], set[str]]:
+def _trace_references(
+    trace_path: Path,
+) -> tuple[set[str], set[tuple[str, str]], set[str], dict[str, list[str]]]:
     trace_ids: set[str] = set()
     span_pairs: set[tuple[str, str]] = set()
     span_ids: set[str] = set()
+    span_serializations: dict[str, list[str]] = {}
     with trace_path.open(encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, 1):
             if not raw_line.strip():
@@ -74,9 +91,13 @@ def _trace_references(trace_path: Path) -> tuple[set[str], set[tuple[str, str]],
                 trace_ids.add(trace_id)
                 span_pairs.add((trace_id, span_id))
                 span_ids.add(span_id)
+                span_serializations.setdefault(span_id, []).append(
+                    json.dumps(span, ensure_ascii=False, separators=(",", ":"))
+                )
+                span_serializations[span_id].extend(_span_verbatim_values(span))
     if not trace_ids:
         raise ValueError(f"prepared trace contains no trace/span ids: {trace_path}")
-    return trace_ids, span_pairs, span_ids
+    return trace_ids, span_pairs, span_ids, span_serializations
 
 
 def _validate_report_references(
@@ -85,6 +106,7 @@ def _validate_report_references(
     trace_ids: set[str],
     span_pairs: set[tuple[str, str]],
     span_ids: set[str],
+    span_serializations: dict[str, list[str]],
 ) -> None:
     reported_trace_ids = set(report["report_summary"]["trace_ids"])
     unknown_traces = sorted(reported_trace_ids - trace_ids)
@@ -114,6 +136,12 @@ def _validate_report_references(
                 raise ValueError(
                     f"HALO report {path} references a span outside "
                     f"report_summary.trace_ids: {reference}"
+                )
+            excerpt = item["raw_log_excerpt"]
+            if not any(excerpt in serialized for serialized in span_serializations[reference]):
+                raise ValueError(
+                    f"HALO report {path}.raw_log_excerpt is not a verbatim substring "
+                    f"of referenced span: {reference}"
                 )
 
 
@@ -174,12 +202,13 @@ def _validate_bundle(
     if report_path.stat().st_mtime_ns < prompt_path.stat().st_mtime_ns:
         raise ValueError(f"HALO report is older than the authoritative prompt: {report_path}")
 
-    trace_ids, span_pairs, span_ids = _trace_references(trace_path)
+    trace_ids, span_pairs, span_ids, span_serializations = _trace_references(trace_path)
     _validate_report_references(
         report,
         trace_ids=trace_ids,
         span_pairs=span_pairs,
         span_ids=span_ids,
+        span_serializations=span_serializations,
     )
     return {
         "manifest_path": str(manifest_path),

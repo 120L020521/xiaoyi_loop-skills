@@ -531,6 +531,7 @@ def scripted_mock_for_demo(trace_ids: Optional[list[str]] = None) -> list[dict[s
                                 "reference": tid_a,
                                 "tool": "call_subagent",
                                 "fact": "两个子代理完成检查，但没有返回明确的根执行终止状态。",
+                                "raw_log_excerpt": "call_subagent",
                                 "error": "",
                             }],
                             "root_cause": "模拟Trace缺少明确的根执行终止字段。",

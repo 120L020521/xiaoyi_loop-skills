@@ -179,7 +179,7 @@ Identify the root AGENT span first. Classify exactly one:
 Root success proves execution completion, not external correctness. An
 unrelated OK span never proves recovery.
 
-Return one UTF-8 JSON object with schema version 6 and these fields:
+Return one UTF-8 JSON object with schema version 7 and these fields:
 
 ```text
 report_summary
@@ -203,6 +203,7 @@ diagnosis
       reference
       tool
       fact
+      raw_log_excerpt
       error
     root_cause
     recovery_status
@@ -224,7 +225,7 @@ Copy the resolved `task_id` and `task` unchanged from prompt Context, including 
 supplied and omit it when missing. Include `judge_summary` only when Judge
 context exists.
 
-Use the exact v6 fields emitted by the generated prompt; do not add ad-hoc
+Use the exact v7 fields emitted by the generated prompt; do not add ad-hoc
 fields. Group each distinct material problem into one `error_findings` item. Do not
 repeat the same failed spans in a generic tool-failure error and another
 semantic or validation error. Write `primary_failure_mode` as a brief Chinese
@@ -234,7 +235,19 @@ Use `source` values `TRACE`, `TASK`, `JUDGE`, `SOURCE_FILE`, or `OUTPUT_FILE`.
 For `TRACE`, put the real span id in `reference`; for every other source, use the
 rubric reference, path, filename, or source location needed to verify the fact.
 Keep evidence compact: `fact` states what the source proves and `error` preserves
-the raw error text or uses an empty string. Evidence has no id and no priority.
+the raw error text or uses an empty string. Treat `report_summary.trace_ids` as
+the report-level TRACE anchor. An individual error may be proved entirely by
+`TASK`, `JUDGE`, `SOURCE_FILE`, or `OUTPUT_FILE` evidence; do not attach an
+irrelevant TRACE merely to satisfy that error. When an error uses `TRACE`
+evidence, its `raw_log_excerpt` must be a verbatim excerpt copied from the
+referenced Span's serialized log content. Include enough
+contiguous context for a reader to understand what operation ran, which input or
+result mattered, and where it failed. Prefer the triggering command/call plus
+the decisive output, status, or exception (typically 3-20 relevant lines when
+available), rather than only the final exception line. Omit unrelated noise;
+preserve original punctuation, identifiers, and line breaks, and do not
+translate or paraphrase it. Use an empty string for
+`raw_log_excerpt` on non-TRACE evidence. Evidence has no id and no priority.
 
 Write human-facing error and change values in Simplified Chinese. This includes
 `primary_failure_mode`, error titles, summaries, facts, root causes and impacts, plus change titles,
@@ -244,10 +257,36 @@ names, paths, filenames, and raw errors unchanged. Use concise
 `UPPER_SNAKE_CASE` error categories and exactly one recovery status:
 `RECOVERED`, `UNRECOVERED`, `UNPROVEN`, or `NOT_APPLICABLE`.
 
-Rank errors and changes with P0-P4 only as relative ordering, without fixed
-severity meanings. Every change must cite one or more existing `error_refs`
-and give concrete, verifiable `acceptance_criteria`. Never invent errors or
+Rank errors and changes with the following fixed policy:
+
+- `P0`: directly causes a missing or materially wrong core output, or can make
+  the system falsely accept a failed task as successful.
+- `P1`: blocks reliable execution, recovery, or validation; violates an
+  important required constraint; or creates a major correctness risk without
+  being the dominant core-output failure.
+- `P2`: materially wastes calls, retries, time, or context, or creates a
+  recurring stability problem while preserving the result.
+- `P3`: limited robustness or maintainability issue with low current impact.
+- `P4`: optional polish or low-benefit improvement.
+
+Choose priority from trace-supported impact and urgency, not category names or
+tool error counts. Rank the dominant root cause above secondary symptoms. For
+example, wrong source columns that corrupt the main data are `P0`; a required
+chart-orientation mismatch or a broken output-verification script is normally
+`P1`; repeated unchanged reads are normally `P2`. Missing root terminal
+evidence is `P1`, but becomes `P0` when downstream automation uses it to decide
+success, retry, or billing. Every change must cite one or more existing
+`error_refs` and give concrete, verifiable `acceptance_criteria`. A change may
+combine multiple errors only when one implementation at one layer genuinely
+resolves all of them; otherwise split the changes. Never invent errors or
 changes to fill a priority.
+
+One error may be referenced by multiple proposed changes when they represent
+genuinely different modification directions. Use separate changes for
+independent layers or mutually exclusive alternatives, and state the applicable
+condition in `problem` or `implementation`. Do not assign unsupported numeric
+probabilities such as `50%`; prefer deterministic conditions. Avoid duplicate
+changes that differ only in wording.
 
 For `FAILED`, produce exactly 3-5 actionable changes. For every other execution
 classification, allow 0-5 and use an empty array when no trace-supported change
@@ -272,7 +311,7 @@ Use the manifest's exact `manifest_path`; do not derive another one. Fix the
 report and rerun validation until it exits zero and returns
 `"validation": "complete"`. This single HALO-owned acceptance step enforces:
 
-- schema version 6, exact fields, types, nesting, enums, Chinese narratives,
+- schema version 7, exact fields, types, nesting, enums, Chinese narratives,
   error/reference integrity, allowed component/target values, and
   classification-dependent change counts;
 - one error-free prepared-trace manifest whose source, selected trace, prompt,
@@ -280,7 +319,8 @@ report and rerun validation until it exits zero and returns
 - a prepared trace that is not older than its source and a report that is not
   older than the authoritative prompt;
 - report trace ids and every `TRACE` evidence reference that actually exist in
-  the prepared trace; all proposed changes must reference report error findings.
+  the prepared trace; every `raw_log_excerpt` must occur verbatim in its
+  referenced Span; all proposed changes must reference report error findings.
 
 Omitting `--manifest` performs schema-only compatibility validation and is not
 sufficient to finish a HALO diagnosis. The complete validator makes no
