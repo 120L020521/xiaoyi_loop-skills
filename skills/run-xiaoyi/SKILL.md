@@ -1,46 +1,37 @@
 ---
 name: run-xiaoyi
 description: >-
-  Route and orchestrate XiaoYi Runner, Judge, and HALO diagnosis requests from one
-  user-facing entry. Run only the Runner by default; append the shared batch Judge
-  only when the user explicitly requests Judge/评分/打分, and append embedded HALO
-  diagnosis only when the user explicitly requests 诊断/HALO/Trace diagnosis. Use
-  for generic “让小艺执行任务”, 文件整理任务/FileOrganization IDs backed by
-  setup.json/expect.json/source/prompts, Task/task/WorkspaceBench requests backed
-  by numeric IDs and metadata.json, existing handoff.json batches, or standalone
-  OTel/OpenTelemetry JSONL trace diagnosis. Resolve the requested terminal stage,
-  wording, ID shape, and dataset schema before any HDC mutation.
+  Route and orchestrate XiaoYi Runner, Judge, and HALO requests from one
+  user-facing control Skill, including the complete Judge-to-HALO batch workflow.
+  Run only the Runner by default; append the shared batch Judge only when the user
+  explicitly requests Judge/评分/打分, and append HALO only when the user explicitly
+  requests 诊断/HALO/Trace diagnosis. Use for generic “让小艺执行任务”, 文件整理任务/
+  FileOrganization IDs backed by setup.json/expect.json/source/prompts, numeric
+  Task/task/WorkspaceBench requests backed by metadata.json, existing handoff.json
+  batches, or standalone OTel/OpenTelemetry JSONL trace diagnosis. Resolve the
+  terminal stage, wording, ID shape, and dataset schema before any HDC mutation.
 ---
 
 # Route XiaoYi Runner Stages
 
 Act as the single user-facing control entry. Select exactly one dataset Runner
 when execution is requested, then execute only the stages explicitly requested.
-The default terminal stage is Runner, not Judge. HALO's detailed diagnosis
-contract and local tools are embedded resources of this Skill and load only for
-an actual diagnosis stage.
+The default terminal stage is Runner, not Judge. Own top-level routing and the
+Judge-to-HALO batch orchestration, while keeping Runner, Judge, and actual HALO
+trace diagnosis in their specialized Skills.
 
 Never start a Judge subagent while a selected Runner case or Task is pending.
 Never run both execution children for one selector. Do not copy their mechanical
 HDC rules or the shared Judge's scoring rules into this coordinator.
 
-## Internal modes
-
-The normal user-facing mode performs the routing rules below. The private
-`halo-diagnose-one` mode is used only by `run-xiaoyi-halo-loop` diagnosis workers
-or when this Skill has already isolated exactly one trace. In that mode, skip
-dataset routing, Runner, Prepare, and Judge; read
-`references/halo-diagnosis.md` completely and diagnose only the supplied trace.
-This private-mode selection takes precedence over every later wording, ID, and
-stage rule and is terminal: never invoke `run-xiaoyi-halo-loop`, a Runner, or a
-Judge from inside it.
+## Route existing diagnosis artifacts
 
 For a user request that diagnoses existing artifacts without running XiaoYi:
 
-- route a valid batch `handoff.json` to `run-xiaoyi-halo-loop`, starting at its
-  handoff-resolution phase;
-- route an explicitly selected JSONL file or trace directory to the embedded
-  HALO workflow below;
+- apply the embedded workflow in `references/halo-loop.md` to a valid batch
+  `handoff.json`, starting at its handoff-resolution phase;
+- route an explicitly selected JSONL file or trace directory directly to
+  `halo-rlm-agent-driven`;
 - never mutate HDC state for either path.
 
 ## Choose the dataset adapter
@@ -173,31 +164,19 @@ uniqueness suffix.
    `runner-and-prepare-only` mode. Wait until every selected Task is prepared or
    has a recorded Runner/prepare failure, then apply `judge-xiaoyi-results` once
    to the whole WorkspaceBench batch.
-4. For `RUNNER_JUDGE_DIAGNOSE`, apply `run-xiaoyi-halo-loop`; it owns the explicit
-   Runner → Judge → diagnosis sequence and must not duplicate Runner or Judge.
-   Its per-Task diagnosis workers call this Skill in `halo-diagnose-one` mode;
-   they do not resolve a separate HALO Skill.
+4. For `RUNNER_JUDGE_DIAGNOSE`, read `references/halo-loop.md` completely and
+   apply its explicit Runner → Judge → diagnosis → batch-report workflow. Never
+   duplicate Runner or Judge. Its per-Task diagnosis workers apply
+   `halo-rlm-agent-driven`; they never call back into this control workflow.
 
-## Run embedded HALO diagnosis
+## Judge-to-HALO batch orchestration
 
-Enter this workflow only for an explicit diagnosis stage, a trace-only request,
-or private `halo-diagnose-one` mode. Do not load it for Runner-only or
-Runner+Judge requests.
-
-1. Read `references/halo-diagnosis.md` completely before preparing or inspecting
-   a trace. It is the authoritative evidence, classification, report, and
-   validation contract.
-2. Resolve `<run_xiaoyi_root>/scripts/halo` as `<halo_scripts>`. Run
-   `prepare_trace.py` from that directory and run every `python -m halo_rlm...`
-   command with `<halo_scripts>` as the working directory.
-3. For private `halo-diagnose-one`, accept exactly one raw JSONL and the exact
-   output/context paths supplied by `run-xiaoyi-halo-loop`. Never scan a sibling
-   Task or substitute a batch directory for the exact trace.
-4. For a direct trace-only directory request, let `prepare_trace.py` enumerate
-   only that explicitly selected directory, then diagnose each returned manifest
-   entry once.
-5. Write generated artifacts only under the resolved HALO output root and finish
-   only after the embedded contract's manifest-bound report validation succeeds.
+Load `references/halo-loop.md` only for `RUNNER_JUDGE_DIAGNOSE` or an existing
+batch handoff. Resolve `<skill_root>/scripts/halo-loop` exactly as the reference
+specifies. That workflow owns batch handoff creation/resolution, one fresh HALO
+worker per eligible numeric Task, failure isolation, and final HTML rendering.
+Actual Trace investigation, JSON report generation, and manifest-bound report
+validation remain exclusively owned by `halo-rlm-agent-driven`.
 
 ## Judge existing artifacts only
 
@@ -216,7 +195,7 @@ matching `judge-xiaoyi-results` adapter.
 | “执行 filestask 下的 39” with numeric metadata | WorkspaceBench | folder name does not override numeric ID/schema |
 | “执行 Task FileOrganization_0_003” | file organization | standalone Task is weak; FileOrganization ID wins |
 | “执行 Task 112，Judge 后做 HALO 诊断” | WorkspaceBench HALO | run → Judge → HALO |
-| “诊断 D:\\logs\\task112.jsonl，不要运行小艺” | embedded HALO | trace-only diagnosis; no HDC/Runner/Judge |
+| “诊断 D:\\logs\\task112.jsonl，不要运行小艺” | `halo-rlm-agent-driven` | trace-only diagnosis; no HDC/Runner/Judge |
 
 Before dispatch, state the selected mode and decisive signals in one sentence.
 After completion, report only stages that actually ran. Never imply Judge or

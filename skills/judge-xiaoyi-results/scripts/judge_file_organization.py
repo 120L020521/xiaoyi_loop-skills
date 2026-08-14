@@ -21,7 +21,9 @@ DIRECTORY_RE = re.compile(
     r"^(?P<path>.+?) 是否存在且类型为目录，其直接子项是否恰好为 "
     r"(?P<count>\d+) 个，且完整名称集合为 (?P<names>.*?)？$"
 )
-FILES_MD5_PREFIX = "以下文件是否存在且类型为文件，且 MD5 分别正确："
+FILES_MD5_RUBRIC_RE = re.compile(
+    r"^以下文件是否存在且类型为文件，且 MD5 (?:均)?分别正确：(?P<body>.+)？$"
+)
 FILE_MD5_RE = re.compile(r"^(?P<path>.+?)（(?P<md5>[0-9a-fA-F]{32})）$")
 
 
@@ -113,11 +115,7 @@ def _evaluate_children(
     )
 
 
-def _evaluate_files(outputs: Path, rubric: str) -> tuple[bool, str]:
-    body = rubric[len(FILES_MD5_PREFIX):]
-    if not body.endswith("？"):
-        raise JudgeInputError(f"unsupported MD5 rubric punctuation: {rubric}")
-    body = body[:-1]
+def _evaluate_files(outputs: Path, body: str, rubric: str) -> tuple[bool, str]:
     specifications: list[tuple[str, str]] = []
     for chunk in body.split("、"):
         match = FILE_MD5_RE.fullmatch(chunk.strip())
@@ -169,8 +167,9 @@ def evaluate_rubric(outputs: Path, rubric: str) -> tuple[bool, str]:
             require_directory_phrase=False,
         )
 
-    if rubric.startswith(FILES_MD5_PREFIX):
-        return _evaluate_files(outputs, rubric)
+    files_match = FILES_MD5_RUBRIC_RE.fullmatch(rubric)
+    if files_match is not None:
+        return _evaluate_files(outputs, files_match.group("body"), rubric)
     raise JudgeInputError(f"unsupported FileOrganization rubric: {rubric}")
 
 
@@ -238,7 +237,11 @@ def judge_file_organization(metadata_path: Path, outputs: Path) -> dict[str, Any
 
     rubric_results: list[dict[str, Any]] = []
     for index, rubric in enumerate(rubrics):
-        passed, evidence = evaluate_rubric(outputs, rubric)
+        try:
+            passed, evidence = evaluate_rubric(outputs, rubric)
+        except JudgeInputError as exc:
+            passed = False
+            evidence = f"unsupported or invalid rubric: {exc}"
         rubric_results.append(
             {
                 "index": index,

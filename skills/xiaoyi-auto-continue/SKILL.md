@@ -40,8 +40,9 @@ generation.
 | Generate the next affirmative query | host agent |
 
 Never issue HDC commands directly and never edit the bundled Python scripts while
-executing a case. A successful process exit or `completed.json` means only that a
-round reached a stop event; it does not prove business completion.
+executing a case. The only device-control exception is the one-time, bundled
+preflight force-stop below. A successful process exit or `completed.json` means
+only that a round reached a stop event; it does not prove business completion.
 
 ## Resolve inputs
 
@@ -125,6 +126,25 @@ Before starting case B, assert all three conditions:
 Treat `run_test.py` as a long-running, quiet process. Start each round once and
 wait for that same process. Do not relaunch it because terminal output is quiet or
 truncated.
+
+## One-time first-case preflight
+
+After resolving and validating the whole queue, but immediately before Round 0
+of the first pending selected case, force-stop XiaoYi exactly once through the
+bundled helper. Run from `<skill_root>`:
+
+```powershell
+& <python> -B "<skill_root>\scripts\preflight_force_stop.py" `
+  --config "<config_path>" `
+  --verbose
+```
+
+This is a batch-level preflight, not a per-case or per-round step. Do not repeat
+it before later cases, before continue rounds, or when every selected case is
+already terminal and no Round 0 will be pushed. The helper reads `hdc_target`
+from the resolved config and calls the same `force_stop` implementation used by
+`run_test.py`; do not compose a raw `hdc` command. If the helper exits nonzero,
+stop before the first prompt is pushed and report a Runner preflight error.
 
 ## Round 0: first push
 

@@ -7,7 +7,7 @@ description: >-
   directories backed by metadata.json, case_manifest.json, agent.json,
   normalized_runner_log.jsonl, and output/. Supports Judge-only requests,
   re-Judge, scoring, and the post-run batch Judge phase delegated by run-xiaoyi,
-  run-xiaoyi-loop, or run-xiaoyi-halo-loop.
+  or run-xiaoyi-loop.
 ---
 
 # Judge XiaoYi Results
@@ -75,9 +75,13 @@ The evaluator must:
 - require all three output roots and preserve exact case-sensitive names;
 - ignore `outputs_manifest.json` as Runner bookkeeping;
 - normalize `\` and `/` in rubric paths without allowing path traversal;
+- accept the dataset's equivalent MD5 rubric prefix with or without the optional
+  `均` character;
 - compare direct-child sets exactly, including unexpected entries;
 - verify requested file/directory types and MD5 values;
-- fail safely with `status = "error"` for an unsupported rubric or incomplete
+- record an unsupported or malformed individual rubric as `passed = false` with
+  the parser error in `evidence`, then continue evaluating later rubrics;
+- fail safely with `status = "error"` for invalid shared inputs or an incomplete
   outputs snapshot;
 - fingerprint `metadata.json` and the three output trees so a stale result is
   never resumed after inputs change.

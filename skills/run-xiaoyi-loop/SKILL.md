@@ -247,8 +247,8 @@ here.
 When a parent coordinator explicitly requests `runner-and-prepare-only`, stop
 after every selected Task is prepared or has a recorded prepare/Runner failure.
 Return exact prepared Task directories and current Trace paths without spawning
-Judge subagents. This mode exists so `run-xiaoyi-halo-loop` can orchestrate three
-distinct Skills in order: run, Judge, then HALO. For a direct invocation, use
+  Judge subagents. This mode exists so `run-xiaoyi` can orchestrate three
+  distinct phases in order: run, Judge, then HALO. For a direct invocation, use
 Runner-only unless the user explicitly requested Judge.
 
 When Judge ran, return its concise result table with Runner status, Judge status,

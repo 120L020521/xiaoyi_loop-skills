@@ -52,6 +52,18 @@ class JudgeFileOrganizationTests(unittest.TestCase):
         self.assertEqual(result["summary"], {"total": 3, "passed": 2, "failed": 1})
         self.assertFalse(result["rubrics"][1]["passed"])
 
+    def test_md5_rubric_accepts_optional_uniform_character(self) -> None:
+        temp, metadata, outputs = self._fixture()
+        self.addCleanup(temp.cleanup)
+        value = json.loads(metadata.read_text(encoding="utf-8"))
+        value["rubrics"][2] = value["rubrics"][2].replace(
+            "MD5 分别正确", "MD5 均分别正确"
+        )
+        metadata.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+        result = judge_file_organization(metadata, outputs)
+        self.assertTrue(result["rubrics"][2]["passed"])
+        self.assertTrue(result["passed"])
+
     def test_missing_output_root_is_error(self) -> None:
         temp, metadata, outputs = self._fixture()
         self.addCleanup(temp.cleanup)
@@ -59,14 +71,38 @@ class JudgeFileOrganizationTests(unittest.TestCase):
         with self.assertRaisesRegex(JudgeInputError, "missing roots: Documents"):
             judge_file_organization(metadata, outputs)
 
-    def test_unsupported_rubric_is_error(self) -> None:
-        temp, metadata, outputs = self._fixture()
-        self.addCleanup(temp.cleanup)
-        value = json.loads(metadata.read_text(encoding="utf-8"))
-        value["rubrics"] = ["任务看起来是否完成？"]
-        metadata.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-        with self.assertRaisesRegex(JudgeInputError, "unsupported"):
-            judge_file_organization(metadata, outputs)
+    def test_unsupported_rubric_is_failed_and_other_rubrics_continue(self) -> None:
+        unsupported = "任务看起来是否完成？"
+        for position in (0, 1, 3):
+            with self.subTest(position=position):
+                temp, metadata, outputs = self._fixture()
+                try:
+                    value = json.loads(metadata.read_text(encoding="utf-8"))
+                    value["rubrics"].insert(position, unsupported)
+                    metadata.write_text(
+                        json.dumps(value, ensure_ascii=False), encoding="utf-8"
+                    )
+                    result = judge_file_organization(metadata, outputs)
+                    self.assertEqual(result["status"], "success")
+                    self.assertEqual(
+                        result["summary"], {"total": 4, "passed": 3, "failed": 1}
+                    )
+                    self.assertFalse(result["passed"])
+                    self.assertEqual(result["score"], 0.75)
+                    self.assertFalse(result["rubrics"][position]["passed"])
+                    self.assertIn(
+                        "unsupported or invalid rubric",
+                        result["rubrics"][position]["evidence"],
+                    )
+                    self.assertTrue(
+                        all(
+                            item["passed"]
+                            for index, item in enumerate(result["rubrics"])
+                            if index != position
+                        )
+                    )
+                finally:
+                    temp.cleanup()
 
     def test_manifest_can_block_incomplete_snapshot(self) -> None:
         temp, metadata, outputs = self._fixture()
