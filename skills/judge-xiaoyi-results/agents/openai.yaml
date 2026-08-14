@@ -1,0 +1,4 @@
+interface:
+  display_name: "XiaoYi Results Judge"
+  short_description: "Judge file organization and WorkspaceBench outputs"
+  default_prompt: "Use $judge-xiaoyi-results to evaluate these XiaoYi artifacts and write verified Judge results."

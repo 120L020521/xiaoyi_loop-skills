@@ -1,0 +1,6 @@
+interface:
+  display_name: "XiaoYi File Runner"
+  short_description: "串行执行文件整理任务并智能处理二次确认"
+  default_prompt: "Use $xiaoyi-auto-continue to execute this explicit FileOrganization batch and return its completed Runner handoff."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,11 @@
+httpx>=0.27
+langchain-openai>=0.3
+PyYAML>=6
+tomli>=2; python_version < "3.11"
+openpyxl>=3.0.10
+
+# Rich output evidence extraction used by the vendored Workspace-Bench Judge.
+python-pptx>=1
+pypdf>=5
+pdfminer.six>=20231228
+xlrd>=2
