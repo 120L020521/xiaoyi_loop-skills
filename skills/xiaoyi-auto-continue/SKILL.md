@@ -79,8 +79,10 @@ prompt before the first push and retain it as the task contract for all later
 decisions. Treat `expect.json.result` and pulled outputs as supporting evidence,
 not as permission to broaden the task.
 
-Use one stable unique `<run_id>` for every round and every case in the selected
-batch, preferably `YYYYMMDD_HHMMSS`:
+Use one stable date-only `<run_id>` for every round and every case in the
+selected daily batch. Set it to exactly `YYYYMMDD` in the Agent's local timezone.
+Keep at most one FileOrganization batch per calendar day. Never append an
+`HHMMSS`, numeric, random, or other uniqueness suffix:
 
 ```text
 <output_base> = <agent_workspace>/xiaoyi_file_runs
@@ -90,10 +92,11 @@ batch, preferably `YYYYMMDD_HHMMSS`:
 <meta> = <case_dir>/<case_id>.meta.json
 ```
 
-If `<case_dir>/completed.json` already exists before a requested fresh first run,
-do not delete or overwrite historical evidence merely to bypass the runner's skip
-logic. Use an explicitly selected new run date/output root, or report that the
-case is already present and request direction when the intended run is ambiguous.
+If `<case_dir>/completed.json` already exists, treat that case as an existing
+member of the same daily batch and preserve the runner's skip behavior. Do not
+delete or overwrite its evidence and do not create a suffixed second run for the
+same day. If the user explicitly requests a fresh replacement of today's batch,
+stop and request direction before changing historical evidence.
 
 ## Execute strictly serially
 
@@ -310,7 +313,7 @@ on conversation memory:
 {
   "version": 1,
   "adapter": "file-organization",
-  "runId": "20260814_153000",
+  "runId": "20260814",
   "runDir": "<absolute_run_dir>",
   "testFileBase": "<absolute_test_file_base>",
   "runnerFinished": true,

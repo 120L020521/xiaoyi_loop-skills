@@ -134,14 +134,15 @@ Resolve `<agent_workspace>` as the calling Agent's runtime workspace. Keep all
 generated artifacts there by default, never under an installed Skill or dataset:
 
 ```text
-<agent_workspace>/xiaoyi_file_runs/run_<run_id>/   # FileOrganization Runner
+<agent_workspace>/xiaoyi_file_runs/run_<YYYYMMDD>/ # FileOrganization Runner
 <agent_workspace>/xiaoyi_logs/                     # WorkspaceBench Runner
 <agent_workspace>/xiaoyi_judge/                    # shared Judge
 <agent_workspace>/xiaoyi_halo/                     # HALO
 ```
 
-Explicit user output paths win. Preserve one unique FileOrganization `run_id`
-for the whole batch.
+Explicit user output paths win. Preserve one date-only FileOrganization `run_id`
+formatted exactly as `YYYYMMDD` for the whole daily batch; never append a time or
+uniqueness suffix.
 
 ## Dispatch file organization
 
