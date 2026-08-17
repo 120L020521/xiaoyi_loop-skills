@@ -204,7 +204,8 @@ xiaoyi_halo/
 │   ├── halo-prepared-manifest.json
 │   ├── halo_prompt.txt
 │   └── halo_report.json
-└── batch_summary.json
+├── batch_diagnosis_report.html
+└── batch_diagnosis_report.archive-<UTC>.html  # 超过归档阈值时生成
 ```
 
 ## 1. 使用 run-xiaoyi-loop
@@ -301,7 +302,7 @@ task                  ← task 或 description
 expected_output_files ← output_files 或 expected_output_files
 ```
 
-每个 Trace 只能构建一次 Prompt。诊断必须使用该 Prompt，生成 schema-v7 UTF-8
+每个 Trace 只能构建一次 Prompt。诊断必须使用该 Prompt，生成 schema-v9 UTF-8
 JSON 报告，并反复执行以下校验直到成功：
 
 ```powershell
@@ -309,7 +310,7 @@ python -m halo_rlm.agent_cli validate-report "<manifest.report_path>" `
   --manifest "<manifest.manifest_path>"
 ```
 
-校验成功时必须返回 `validation=complete`。HALO 在同一入口中完成 schema-v7
+校验成功时必须返回 `validation=complete`。HALO 在同一入口中完成 schema-v9
 结构、manifest 路径绑定、产物新鲜度、报告 Trace/Span 引用真实性及关键日志原文
 与对应 Span 的逐字匹配校验；只诊断
 而不经过批量编排时也执行相同的完整校验。
@@ -320,7 +321,7 @@ python -m halo_rlm.agent_cli validate-report "<manifest.report_path>" `
 `diagnosis` 和 `proposed_changes` 下的人类可读内容使用简体中文，JSON 字段名、枚举、
 ID、时间戳、路径和原始证据保持原样。
 
-### HALO 报告结构（schema v7）
+### HALO 报告结构（schema v9）
 
 `halo_report.json` 顶层固定为四个字段：
 
@@ -361,10 +362,10 @@ diagnosis
     evidence[]
       source
       reference
+      span_index
       tool
       fact
       raw_log_excerpt
-      error
     root_cause
     recovery_status
     impact
@@ -402,11 +403,15 @@ proposed_changes[]
 }
 ```
 
-错误和建议使用 `P0` 至 `P4` 表示报告内的相对优先顺序；Evidence 不设置优先级或独立
-ID，通过 `source` 和 `reference` 定位。整份报告通过 `report_summary.trace_ids`
+错误和建议使用 `P0` 至 `P4` 表示报告内的相对优先顺序；Evidence 不设置优先级、独立
+ID 或 `error` 字段，通过 `source`、`reference` 和 `span_index` 定位。整份报告通过 `report_summary.trace_ids`
 提供 TRACE 锚点；单个错误可以只由 Judge、源文件或输出文件证据证明。使用 TRACE
 evidence 时，
-其 `raw_log_excerpt` 保存对应 Span 中最关键的日志原文；非 TRACE evidence 使用空字符串。
+`reference` 保存真实 `span_id`，`span_index` 保存零基 Trace 内索引，
+`raw_log_excerpt` 必须从 `source-evidence` 映射的转换前源 JSONL 事件逐字复制，并包含
+触发输入、执行状态或错误输出以及紧邻的恢复/影响上下文。通常保留 5–20 行或
+400–3,000 字符，最长不超过 5,000 字符；非 TRACE evidence 使用 `span_index=null` 和
+空 `raw_log_excerpt`。
 `source` 可取 `TRACE`、`TASK`、`JUDGE`、
 `SOURCE_FILE` 或 `OUTPUT_FILE`；`recovery_status` 可取 `RECOVERED`、`UNRECOVERED`、
 `UNPROVEN` 或 `NOT_APPLICABLE`。
@@ -444,7 +449,7 @@ Judge：一 Task 一个独立 Judge subagent
                     ↓
 HALO：一 Task 一个独立诊断 subagent
                     ↓
-HALO 完成诊断，父 Agent 生成批次汇总
+HALO 完成诊断，父 Agent 生成批次 HTML 报告
 ```
 
 Judge 与 HALO 使用相同的外层调度模式：建立队列、一个 Task 一个 fresh subagent、
@@ -489,7 +494,7 @@ HALO Agent 117 → xiaoyi_halo/task117_halo/
 流程并返回 manifest 和 report 路径；父 Agent 不运行或解释 `validate-report`，只记录
 HALO 成功/失败状态并调用 `summarize` 检查当前批次的新鲜度和路径绑定。
 
-### 批次汇总
+### 批次 HTML 汇总
 
 每份 `halo_report.json` 通过严格校验后，默认执行：
 
@@ -504,9 +509,32 @@ python run-xiaoyi-halo-loop/scripts/handoff.py summarize `
 <resolved_halo_output>/batch_diagnosis_report.html
 ```
 
+该 HTML 使用 `run-xiaoyi-halo-loop/assets/halo_diagnostic_report.template.html`
+作为唯一固定模板，保持深蓝页头、吸顶筛选栏、左侧可收起目录、居中的白色 Task
+区域和深色 JSON 日志块。目录展开或收起时正文目标宽度不变；窄屏时目录移到正文上方。
+
+每个 Task 不再把全部错误和全部建议分成两组，而是按“改进项”连续展示：
+
+```text
+关联错误（可为一个或多个）
+  → 修改建议、目标文件、实施方案、验收标准和预期影响
+  → 证据链（默认折叠）
+```
+
+一条建议通过 `error_refs` 关联多个错误时合并展示；同一错误被多条不同建议引用时，
+允许在多个改进项中重复出现。没有关联建议的错误仍保留为独立改进项，但不会虚构建议。
+TRACE 的日志原文在证据链中按 JSON 对象/数组或逐行 JSONL 进行两空格格式化；纯文本
+会包装为 `{"raw_log_excerpt": "原文"}` 后展示，HALO JSON 中保存的原值不变。
+
+报告支持搜索以及 Task、Judge、执行分类、错误类别、建议优先级、建议组件和恢复状态
+筛选，并链接可用的 Judge JSON、Trace JSONL 和 HALO JSON。
+
 主 HTML 默认保留最新 500 条 Trace 身份记录。超过阈值时，较旧记录会写入同目录的
 `batch_diagnosis_report.archive-<UTC>.html`，并由主报告提供链接。需要调整阈值时使用
 `summarize --archive-threshold <N>`；`0` 表示关闭归档。
+
+需要自定义输出文件时使用 `summarize --output <path>.html`。编排层不会另写
+`xiaoyi_halo/batch_summary.json`；`xiaoyi_judge/batch_summary.json` 仍由 Judge 阶段拥有。
 
 ## 从已有 handoff 继续
 
