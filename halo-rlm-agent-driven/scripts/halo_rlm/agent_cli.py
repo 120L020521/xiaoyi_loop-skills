@@ -13,21 +13,16 @@ from .better_harness import (
     DEFAULT_EDITABLE_SURFACES,
     build_halo_prompt,
 )
-from .report_contract import normalize_json_report
-
-
-def _span_verbatim_values(value: Any) -> list[str]:
-    values: list[str] = []
-    if isinstance(value, str):
-        values.append(value)
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            values.append(str(key))
-            values.extend(_span_verbatim_values(item))
-    elif isinstance(value, list):
-        for item in value:
-            values.extend(_span_verbatim_values(item))
-    return values
+from .report_contract import (
+    RAW_LOG_EXCERPT_CONTEXT_FLOOR_CHARS,
+    RAW_LOG_EXCERPT_MAX_CHARS,
+    normalize_json_report,
+)
+from .source_evidence import (
+    SourceEvidence,
+    build_source_evidence,
+    choose_source_excerpt,
+)
 
 
 def _load_object(path: str | None, label: str) -> dict[str, Any]:
@@ -65,39 +60,21 @@ def _require_file(path: Path, label: str) -> None:
 
 
 def _trace_references(
+    source_path: Path,
     trace_path: Path,
-) -> tuple[set[str], set[tuple[str, str]], set[str], dict[str, list[str]]]:
-    trace_ids: set[str] = set()
-    span_pairs: set[tuple[str, str]] = set()
-    span_ids: set[str] = set()
-    span_serializations: dict[str, list[str]] = {}
-    with trace_path.open(encoding="utf-8") as handle:
-        for line_number, raw_line in enumerate(handle, 1):
-            if not raw_line.strip():
-                continue
-            try:
-                span = json.loads(raw_line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"prepared trace contains invalid JSON at line {line_number}: {trace_path}"
-                ) from exc
-            if not isinstance(span, dict):
-                raise ValueError(
-                    f"prepared trace line {line_number} must be a JSON object: {trace_path}"
-                )
-            trace_id = span.get("trace_id")
-            span_id = span.get("span_id")
-            if isinstance(trace_id, str) and trace_id and isinstance(span_id, str) and span_id:
-                trace_ids.add(trace_id)
-                span_pairs.add((trace_id, span_id))
-                span_ids.add(span_id)
-                span_serializations.setdefault(span_id, []).append(
-                    json.dumps(span, ensure_ascii=False, separators=(",", ":"))
-                )
-                span_serializations[span_id].extend(_span_verbatim_values(span))
+) -> tuple[
+    set[str],
+    set[tuple[str, str]],
+    set[str],
+    dict[tuple[str, str], SourceEvidence],
+]:
+    evidence_map = build_source_evidence(source_path, trace_path)
+    span_pairs = set(evidence_map)
+    trace_ids = {trace_id for trace_id, _span_id in span_pairs}
+    span_ids = {span_id for _trace_id, span_id in span_pairs}
     if not trace_ids:
         raise ValueError(f"prepared trace contains no trace/span ids: {trace_path}")
-    return trace_ids, span_pairs, span_ids, span_serializations
+    return trace_ids, span_pairs, span_ids, evidence_map
 
 
 def _validate_report_references(
@@ -106,7 +83,7 @@ def _validate_report_references(
     trace_ids: set[str],
     span_pairs: set[tuple[str, str]],
     span_ids: set[str],
-    span_serializations: dict[str, list[str]],
+    source_evidence: dict[tuple[str, str], SourceEvidence],
 ) -> None:
     reported_trace_ids = set(report["report_summary"]["trace_ids"])
     unknown_traces = sorted(reported_trace_ids - trace_ids)
@@ -122,26 +99,67 @@ def _validate_report_references(
             if item["source"] != "TRACE":
                 continue
             reference = item["reference"]
-            matching_traces = {
-                trace_id for trace_id, span_id in span_pairs if span_id == reference
+            matching_pairs = {
+                (trace_id, span_id)
+                for trace_id, span_id in span_pairs
+                if span_id == reference and trace_id in reported_trace_ids
             }
             path = (
                 f"diagnosis.error_findings[{error_index}].evidence[{evidence_index}]"
             )
-            if not matching_traces:
+            if not any(span_id == reference for _trace_id, span_id in span_pairs):
                 raise ValueError(
                     f"HALO report {path} references an absent span id: {reference}"
                 )
-            if not matching_traces.intersection(reported_trace_ids):
+            if not matching_pairs:
                 raise ValueError(
                     f"HALO report {path} references a span outside "
                     f"report_summary.trace_ids: {reference}"
                 )
+            if len(matching_pairs) != 1:
+                raise ValueError(
+                    f"HALO report {path} span reference is ambiguous across reported traces: "
+                    f"{reference}"
+                )
+            matched_pair = next(iter(matching_pairs))
+            mapped = source_evidence[matched_pair]
+            if item["span_index"] != mapped.span_index:
+                raise ValueError(
+                    f"HALO report {path}.span_index does not match referenced span "
+                    f"{reference}: got {item['span_index']}, expected {mapped.span_index}"
+                )
             excerpt = item["raw_log_excerpt"]
-            if not any(excerpt in serialized for serialized in span_serializations[reference]):
+            sources = mapped.candidates
+            if not sources:
+                raise ValueError(
+                    f"HALO report {path} has no mapped pre-conversion source events "
+                    f"for referenced span: {reference}"
+                )
+            if not any(excerpt in serialized for serialized in sources):
                 raise ValueError(
                     f"HALO report {path}.raw_log_excerpt is not a verbatim substring "
-                    f"of referenced span: {reference}"
+                    f"of mapped pre-conversion source events for span: {reference}"
+                )
+            available_context = max(len(serialized) for serialized in sources)
+            required_context = min(
+                RAW_LOG_EXCERPT_CONTEXT_FLOOR_CHARS,
+                available_context,
+            )
+            if len(excerpt) < required_context:
+                raise ValueError(
+                    f"HALO report {path}.raw_log_excerpt is too short to show context: "
+                    f"got {len(excerpt)} characters, require at least {required_context} "
+                    f"for referenced span {reference}"
+                )
+            outcome_candidates = mapped.outcome_candidates
+            if not any(
+                excerpt in outcome or outcome in excerpt
+                for outcome in outcome_candidates
+            ):
+                raise ValueError(
+                    f"HALO report {path}.raw_log_excerpt must include verbatim "
+                    f"execution status or error output from mapped pre-conversion "
+                    f"source events for span: {reference}"
                 )
 
 
@@ -202,19 +220,69 @@ def _validate_bundle(
     if report_path.stat().st_mtime_ns < prompt_path.stat().st_mtime_ns:
         raise ValueError(f"HALO report is older than the authoritative prompt: {report_path}")
 
-    trace_ids, span_pairs, span_ids, span_serializations = _trace_references(trace_path)
+    (
+        trace_ids,
+        span_pairs,
+        span_ids,
+        source_evidence,
+    ) = _trace_references(source_path, trace_path)
     _validate_report_references(
         report,
         trace_ids=trace_ids,
         span_pairs=span_pairs,
         span_ids=span_ids,
-        span_serializations=span_serializations,
+        source_evidence=source_evidence,
     )
     return {
         "manifest_path": str(manifest_path),
         "source_trace": str(source_path),
         "prepared_trace": str(trace_path),
         "prompt_path": str(prompt_path),
+    }
+
+
+def _source_evidence(args: argparse.Namespace) -> dict[str, Any]:
+    manifest_path = Path(args.manifest).resolve()
+    _require_file(manifest_path, "HALO manifest")
+    manifest = _load_object(str(manifest_path), "--manifest")
+    entries = manifest.get("prepared_traces")
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+        raise ValueError(
+            f"HALO manifest must contain exactly one prepared trace: {manifest_path}"
+        )
+    entry = entries[0]
+    source_path = Path(str(entry.get("source") or "")).resolve()
+    trace_path = Path(str(entry.get("selected") or "")).resolve()
+    _require_file(source_path, "source trace")
+    _require_file(trace_path, "prepared trace")
+    evidence_map = build_source_evidence(source_path, trace_path)
+    matches = [
+        evidence
+        for (trace_id, span_id), evidence in evidence_map.items()
+        if span_id == args.span_id and (args.trace_id is None or trace_id == args.trace_id)
+    ]
+    if not matches:
+        raise ValueError(f"prepared trace contains no span id: {args.span_id}")
+    if len(matches) != 1:
+        raise ValueError(
+            f"span id is ambiguous; also pass --trace-id: {args.span_id}"
+        )
+    evidence = matches[0]
+    excerpt = choose_source_excerpt(
+        evidence,
+        max_chars=RAW_LOG_EXCERPT_MAX_CHARS,
+        pattern=args.pattern,
+        context_buffer_chars=args.context_buffer_chars,
+    )
+    return {
+        "status": "ok",
+        "trace_id": evidence.trace_id,
+        "span_id": evidence.span_id,
+        "span_index": evidence.span_index,
+        "source_path": str(source_path),
+        "source_line_numbers": list(evidence.source_line_numbers),
+        "raw_log_excerpt": excerpt,
+        "chars": len(excerpt),
     }
 
 
@@ -263,6 +331,21 @@ def _parser() -> argparse.ArgumentParser:
     prompt.add_argument("--surface", action="append", default=None)
     prompt.add_argument("-p", "--prompt", default=None, help="Additional diagnostic request")
     prompt.set_defaults(handler=_build_prompt)
+
+    source = subparsers.add_parser(
+        "source-evidence",
+        help="Map one prepared span to verbatim pre-conversion source JSONL events",
+    )
+    source.add_argument("--manifest", required=True, help="halo-prepared-manifest.json")
+    source.add_argument("--span-id", required=True)
+    source.add_argument("--trace-id", default=None)
+    source.add_argument(
+        "--pattern",
+        default=None,
+        help="Optional regex used to center an oversized source excerpt",
+    )
+    source.add_argument("--context-buffer-chars", type=int, default=800)
+    source.set_defaults(handler=_source_evidence)
 
     validate = subparsers.add_parser(
         "validate-report", help="Validate and normalize a host-agent halo_report.json"

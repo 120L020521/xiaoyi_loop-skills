@@ -486,6 +486,9 @@ def summarize_command(args: argparse.Namespace) -> int:
             "halo_status": "not_selected",
             "execution_classification": "",
             "primary_failure_mode": "",
+            "trace_ids": [],
+            "expected_output_files": [],
+            "judge_summary": "",
             "error_findings": [],
             "proposed_changes": [],
             "report_path": "",
@@ -506,8 +509,8 @@ def summarize_command(args: argparse.Namespace) -> int:
                 )
                 record["report_path"] = str(report_path)
                 record["report_uri"] = report_path.resolve().as_uri()
-                if report.get("schema_version") != 7:
-                    raise ValueError(f"HALO report schema_version must be 7: {report_path}")
+                if report.get("schema_version") != 9:
+                    raise ValueError(f"HALO report schema_version must be 9: {report_path}")
                 report_summary = report.get("report_summary")
                 if not isinstance(report_summary, dict):
                     raise ValueError(f"HALO report summary must be an object: {report_path}")
@@ -529,6 +532,15 @@ def summarize_command(args: argparse.Namespace) -> int:
                 record["halo_status"] = "success"
                 record["execution_classification"] = classification
                 record["primary_failure_mode"] = primary_failure_mode
+                trace_ids = report_summary.get("trace_ids")
+                expected_output_files = report_summary.get("expected_output_files")
+                judge_summary = report_summary.get("judge_summary")
+                if isinstance(trace_ids, list):
+                    record["trace_ids"] = trace_ids
+                if isinstance(expected_output_files, list):
+                    record["expected_output_files"] = expected_output_files
+                if isinstance(judge_summary, str):
+                    record["judge_summary"] = judge_summary
                 record["error_findings"] = findings
                 record["proposed_changes"] = changes
                 report_task = report_summary.get("task")
@@ -893,10 +905,10 @@ state_file = "artifacts/custom_state.json"
                 "evidence": [{
                     "source": "TRACE",
                     "reference": "span-1",
+                    "span_index": 0,
                     "tool": "bash",
                     "fact": "工具返回非零状态。",
                     "raw_log_excerpt": "exit code 1",
-                    "error": "exit code 1",
                 }],
                 "root_cause": "测试环境与工具参数不兼容。",
                 "recovery_status": "UNRECOVERED",
@@ -914,7 +926,7 @@ state_file = "artifacts/custom_state.json"
                 "expected_impact": "避免无效工具调用。",
             }]
             _write_json(report_path, {
-                "schema_version": 7,
+                "schema_version": 9,
                 "report_summary": {
                     "task_id": f"task{task_id}",
                     "task": f"测试任务 {task_id}",
@@ -987,22 +999,28 @@ state_file = "artifacts/custom_state.json"
         checks += 1
         html = summary_path.read_text(encoding="utf-8")
         if (
-            "<!doctype html>" not in html
-            or "小艺批次诊断报告" not in html
-            or "position: sticky" not in html
-            or "task color-" not in html
-            or "task-nav-list" not in html
-            or "filter-toggle" not in html
-            or "问题是什么" not in html
-            or "怎么解决" not in html
-            or "是根据什么修改的" not in html
-            or "span_id:" not in html
-            or "raw-trace" not in html
-            or "关键日志原文" not in html
-            or "evidence-context" not in html
-            or "evidence-index" not in html
-            or "log-block" not in html
-            or "修改依据来自" in html
+            "<!DOCTYPE html>" not in html
+            or "HALO RLM 批次诊断报告" not in html
+            or "position:sticky" not in html
+            or "id=\"toolbar\"" not in html
+            or "nav#toc" not in html
+            or "toc-toggle" not in html
+            or "toc-collapsed" not in html
+            or "--content-width" not in html
+            or "--toc-width" not in html
+            or "关联错误" not in html
+            or "修改建议" not in html
+            or "证据链（" not in html
+            or "improvement-card" not in html
+            or "span_id=" not in html
+            or "span_index=" not in html
+            or "el('pre','json')" not in html
+            or "日志原文 · JSON" not in html
+            or "formatRawLogExcerptAsJson" not in html
+            or "JSON.stringify(event,null,2)" not in html
+            or "raw_log_excerpt" not in html
+            or "HALO v9" not in html
+            or "class=\"shell\"" in html
             or "const raw =" in html
             or "__BATCH_DATA__" in html
         ):

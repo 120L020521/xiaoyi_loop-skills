@@ -151,7 +151,7 @@ continue the queue. If nested investigator capacity is unavailable, let that
 HALO worker use the HALO skill's bounded single-agent fallback. The parent must
 not run `validate-report`; report acceptance belongs entirely to HALO. Let the
 final renderer perform only current-batch freshness, manifest/source/report
-binding, and HALO v7 structure checks.
+binding, and HALO v9 structure checks.
 
 ### 5. Render the batch HTML report
 
@@ -188,33 +188,45 @@ directory and link them from the main report. Override the limit with
 `summarize --archive-threshold <N>`; use `0` only when the user explicitly asks
 to disable archiving.
 
-The self-contained report starts with every Task folded, keeps the filter bar
-sticky, provides a Task directory with jump links, and lets mobile users
-collapse the filters. Support Task/Judge/classification/error-category/change-
-priority/change-component filters, display error categories in Chinese, merge
-identical changes and combine their `error_refs`, sort changes from P0 to P4,
-and link to available Judge, Trace, and HALO JSON files. Task rails cycle
-through six contrasting colors so adjacent Tasks remain visually distinct.
-Within each Task, render one centered diagnosis stream instead of separate
-problem/change columns. Group each change with all errors referenced by its
-`error_refs`, and present it in this order: priority, “问题是什么”, “怎么解决”,
-then a folded “是根据什么修改的” evidence chain. Show the change's problem
-sources (including full Trace `span_id` values), target component layer and
-target file. Give every problem its own restrained surface, similar to the
-root-cause fields, so adjacent problems remain visually distinct without adding
-colored rails to every nested box. In expanded evidence, make `#1`, `#2`, and
-later evidence labels prominent; group the source, full `span_id`, fact, tool,
-and error metadata in one softly colored context surface. Render
-Judge/source/output evidence as concise notes. Do not add a generic sentence
-listing evidence source types.
-Display every TRACE evidence item's `raw_log_excerpt` verbatim in a separate,
-uncolored log section immediately below that context surface. Do not repeat the
-same metadata as a second JSON code block. Preserve enough excerpt context to
-show the operation, relevant input/result, and exact point of failure, so a
-reader can understand the problem without opening the raw Trace. Keep the
-palette restrained and use color only to distinguish priorities, problems,
-solutions, evidence headers, and expected impact. One error may appear under multiple distinct changes when its
-`error_refs` intentionally support different modification directions.
+Use `assets/halo_diagnostic_report.template.html` as the single source of truth
+for the fixed HTML format. It must retain the same visual structure as the
+workspace reference `xiaoyi_halo/halo_diagnostic_report.html`: dark-blue header,
+sticky chip/filter toolbar, collapsible left directory, centered white Task
+sections, expandable error/change cards, and dark JSON log excerpts. Do not
+replace it with an alternate `.shell`, `.hero`, `.bundle`, or dashboard-card
+layout.
+
+On desktop, keep the centered report stream at the same target width whether
+the left directory is expanded or collapsed. Let the directory consume extra
+space on the left; never squeeze or widen the report stream. Center the
+unchanged stream after collapse. On narrow screens, stack the directory above
+the report and shrink the stream responsively. Support search and
+Task/Judge/classification/error-category/change-priority/change-component/
+recovery filters. Display error categories in Chinese, merge identical changes,
+combine their `error_refs`, sort findings and changes from P0 to P4, and link to
+available Judge, Trace, and HALO JSON files.
+
+Render the Task body as an ordered stream of improvement items instead of two
+separate error and suggestion lists. For each merged proposed change, resolve
+all referenced `error_refs` and present one continuous card in this order:
+关联错误（one or more complete problem summaries）→ 修改建议（target,
+implementation, acceptance criteria, expected impact）→ 证据链（collapsed by
+default）. Repeat an error in separate improvement cards only when multiple
+genuinely distinct changes reference it; group multiple errors when one change
+resolves them together. Preserve an unreferenced error as its own improvement
+item and explicitly state that it has no linked suggestion rather than
+inventing one.
+
+Display every TRACE evidence item's `raw_log_excerpt` from the mapped
+pre-conversion source JSONL events under that evidence card. Parse a JSON
+object/array directly and parse multi-event JSONL line by line, then render each
+event as two-space-indented JSON in `<pre class="json">`. If the excerpt is
+plain text, wrap the unchanged readable value in a JSON object under
+`raw_log_excerpt` so the HTML still presents valid formatted JSON. This is only
+a display transformation: never alter the stored HALO report value. Preserve
+enough context to show the operation, relevant input/result, execution status,
+and exact failure. Convert escaped `\\r\\n`, `\\n`, and `\\t` sequences to
+readable whitespace only in the displayed JSON string.
 When one Task fails or lacks a trace, render the remaining valid Tasks and
 record the failed or skipped Task in the same HTML.
 

@@ -155,11 +155,20 @@ python -m halo_rlm.tool_cli TRACE get_dataset_overview
 python -m halo_rlm.tool_cli TRACE view_trace --trace-id TRACE_ID
 python -m halo_rlm.tool_cli TRACE view_spans --trace-id TRACE_ID --span-id SPAN_ID
 python -m halo_rlm.tool_cli TRACE --list
+python -m halo_rlm.agent_cli source-evidence --manifest MANIFEST_PATH \
+  --trace-id TRACE_ID --span-id SPAN_ID [--pattern DECISIVE_REGEX]
 ```
 
 Use named flags for ordinary arguments. Use `--args` only for one non-empty
 JSON object containing structured filters; never combine it with named flags.
 Read tool data from the top-level `result` field.
+
+After choosing every TRACE evidence span, call `source-evidence` once for that
+span. Copy its `span_index` and decoded `raw_log_excerpt` values unchanged into
+the report. The helper maps the prepared span back to the pre-conversion source
+JSONL events, reports their source line numbers, and centers oversized excerpts
+on `--pattern` when supplied. Do not substitute converted span attributes for
+the returned source excerpt.
 
 Read `references/trace-format.md` only for span shape/truncation and
 `references/architecture.md` only for recursion, compaction, or termination.
@@ -179,7 +188,7 @@ Identify the root AGENT span first. Classify exactly one:
 Root success proves execution completion, not external correctness. An
 unrelated OK span never proves recovery.
 
-Return one UTF-8 JSON object with schema version 7 and these fields:
+Return one UTF-8 JSON object with schema version 9 and these fields:
 
 ```text
 report_summary
@@ -201,10 +210,10 @@ diagnosis
     evidence[]
       source
       reference
+      span_index
       tool
       fact
       raw_log_excerpt
-      error
     root_cause
     recovery_status
     impact
@@ -225,7 +234,7 @@ Copy the resolved `task_id` and `task` unchanged from prompt Context, including 
 supplied and omit it when missing. Include `judge_summary` only when Judge
 context exists.
 
-Use the exact v7 fields emitted by the generated prompt; do not add ad-hoc
+Use the exact v9 fields emitted by the generated prompt; do not add ad-hoc
 fields. Group each distinct material problem into one `error_findings` item. Do not
 repeat the same failed spans in a generic tool-failure error and another
 semantic or validation error. Write `primary_failure_mode` as a brief Chinese
@@ -234,20 +243,31 @@ summary of the dominant root cause rather than an id.
 Use `source` values `TRACE`, `TASK`, `JUDGE`, `SOURCE_FILE`, or `OUTPUT_FILE`.
 For `TRACE`, put the real span id in `reference`; for every other source, use the
 rubric reference, path, filename, or source location needed to verify the fact.
-Keep evidence compact: `fact` states what the source proves and `error` preserves
-the raw error text or uses an empty string. Treat `report_summary.trace_ids` as
+For TRACE evidence, copy the zero-based trace-local `span_index` returned by
+`source-evidence`; for non-TRACE evidence use `null`.
+Keep evidence focused: `fact` states what the source proves. Build the shortest
+complete evidence chain for each finding, normally 1-3 evidence items and never
+more than 5. Order separate items as triggering input/operation, decisive failure,
+then recovery or impact; omit equivalent or repeated evidence. Treat
+`report_summary.trace_ids` as
 the report-level TRACE anchor. An individual error may be proved entirely by
 `TASK`, `JUDGE`, `SOURCE_FILE`, or `OUTPUT_FILE` evidence; do not attach an
 irrelevant TRACE merely to satisfy that error. When an error uses `TRACE`
-evidence, its `raw_log_excerpt` must be a verbatim excerpt copied from the
-referenced Span's serialized log content. Include enough
-contiguous context for a reader to understand what operation ran, which input or
-result mattered, and where it failed. Prefer the triggering command/call plus
-the decisive output, status, or exception (typically 3-20 relevant lines when
-available), rather than only the final exception line. Omit unrelated noise;
-preserve original punctuation, identifiers, and line breaks, and do not
-translate or paraphrase it. Use an empty string for
-`raw_log_excerpt` on non-TRACE evidence. Evidence has no id and no priority.
+evidence, its `raw_log_excerpt` must be one contiguous verbatim window copied from
+the pre-conversion source JSONL events mapped to the referenced Span. Every TRACE evidence item in an error finding must contain
+verbatim execution status or error output; an input/command-only excerpt is
+invalid. Include the triggering command/input, decisive output, failure status
+or exception, and immediate recovery/impact when they coexist in that Span.
+Prefer the complete relevant input/output/status payload when it fits.
+Use at least 400 characters whenever the mapped pre-conversion source events
+contain that much context, and include all available context when shorter. Target 5-20 readable
+lines or 400-3,000 characters and never exceed 5,000. For oversized single-line
+JSON, pass the decisive failure regex to `source-evidence --pattern`, then copy
+its returned contiguous source window. Do not pad, splice fragments,
+or repeat equivalent excerpts. Omit unrelated noise; preserve punctuation,
+identifiers, and line breaks, and do not translate or paraphrase it.
+Use `null` for `span_index` and an empty string for `raw_log_excerpt` on
+non-TRACE evidence. Evidence has no id and no priority.
 
 Write human-facing error and change values in Simplified Chinese. This includes
 `primary_failure_mode`, error titles, summaries, facts, root causes and impacts, plus change titles,
@@ -311,7 +331,7 @@ Use the manifest's exact `manifest_path`; do not derive another one. Fix the
 report and rerun validation until it exits zero and returns
 `"validation": "complete"`. This single HALO-owned acceptance step enforces:
 
-- schema version 7, exact fields, types, nesting, enums, Chinese narratives,
+- schema version 9, exact fields, types, nesting, enums, Chinese narratives,
   error/reference integrity, allowed component/target values, and
   classification-dependent change counts;
 - one error-free prepared-trace manifest whose source, selected trace, prompt,
@@ -319,8 +339,15 @@ report and rerun validation until it exits zero and returns
 - a prepared trace that is not older than its source and a report that is not
   older than the authoritative prompt;
 - report trace ids and every `TRACE` evidence reference that actually exist in
-  the prepared trace; every `raw_log_excerpt` must occur verbatim in its
-  referenced Span; all proposed changes must reference report error findings.
+  the prepared trace; every TRACE `span_index` must equal the referenced span's
+  zero-based trace-local index; every `raw_log_excerpt` must occur verbatim in
+  the mapped pre-conversion source JSONL events; every TRACE excerpt in an error
+  finding must cover verbatim execution status or error output, so
+  input/command-only excerpts are rejected;
+  sufficiently large mapped source-event windows require at least 400 characters of
+  contiguous excerpt context; excerpt and evidence-count limits must be
+  respected; all proposed changes
+  must reference report error findings.
 
 Omitting `--manifest` performs schema-only compatibility validation and is not
 sufficient to finish a HALO diagnosis. The complete validator makes no

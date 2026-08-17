@@ -22,6 +22,8 @@ from halo_rlm.better_harness import (  # noqa: E402
 )
 from halo_rlm.models import TraceFilters  # noqa: E402
 from halo_rlm.report_contract import (  # noqa: E402
+    EVIDENCE_MAX_ITEMS,
+    RAW_LOG_EXCERPT_MAX_CHARS,
     REPORT_SCHEMA_VERSION,
     REPORT_STRUCTURE_GUIDANCE,
     build_report,
@@ -73,10 +75,10 @@ def valid_evidence(source: str = "TRACE") -> dict:
     return {
         "source": source,
         "reference": "span-1" if source == "TRACE" else "input.xlsx/Sheet1!V:V",
+        "span_index": 0 if source == "TRACE" else None,
         "tool": "test_tool" if source == "TRACE" else "",
         "fact": "测试证据证明数据处理存在问题。",
         "raw_log_excerpt": "test error" if source == "TRACE" else "",
-        "error": "test error" if source == "TRACE" else "",
     }
 
 
@@ -179,13 +181,14 @@ def test_trace_store() -> None:
 
 
 def test_report_contract() -> None:
-    section("v7 report contract")
+    section("v9 report contract")
     example = render_report_example(BETTER_HARNESS_COMPONENTS, include_evaluator_context=True)
     check(
         '"error_findings"' in example
         and '"raw_log_excerpt"' in example
+        and '"span_index"' in example
         and "P0 directly causes" in REPORT_STRUCTURE_GUIDANCE,
-        "prompt exposes the fixed v7 structure and priority policy",
+        "prompt exposes the fixed v9 structure and priority policy",
     )
     report = valid_report()
     check(json.loads(normalize(report))["schema_version"] == REPORT_SCHEMA_VERSION, "valid report normalizes")
@@ -194,6 +197,10 @@ def test_report_contract() -> None:
         (lambda r: r["diagnosis"].update(execution_classification="SUCCESS"), "execution_classification must be one of", "classification enum"),
         (lambda r: r["diagnosis"]["error_findings"][0].update(summary="English only"), "Simplified Chinese", "Chinese narratives"),
         (lambda r: r["diagnosis"]["error_findings"][0]["evidence"][0].update(raw_log_excerpt=""), "must be non-empty", "TRACE excerpt required"),
+        (lambda r: r["diagnosis"]["error_findings"][0]["evidence"][0].update(span_index=-1), "integer >= 0", "TRACE span index is nonnegative"),
+        (lambda r: r["diagnosis"]["error_findings"][0]["evidence"][0].update(error="不再支持的字段"), "unsupported fields", "evidence error field remains removed in v9"),
+        (lambda r: r["diagnosis"]["error_findings"][0]["evidence"][0].update(raw_log_excerpt="x" * (RAW_LOG_EXCERPT_MAX_CHARS + 1)), "raw_log_excerpt must be at most", "TRACE excerpt length cap"),
+        (lambda r: r["diagnosis"]["error_findings"][0].update(evidence=[valid_evidence() for _ in range(EVIDENCE_MAX_ITEMS + 1)]), "evidence must contain at most", "evidence chain length cap"),
         (lambda r: r["proposed_changes"][0].update(component="harness"), "component must be one of", "component whitelist"),
         (lambda r: r["proposed_changes"][0].update(error_refs=["ERR99"]), "unknown error ids", "change references"),
     ]
@@ -233,8 +240,52 @@ def test_agent_cli() -> None:
     write_json(report, valid_report())
     check(agent("validate-report", report).returncode == 0, "schema validation")
 
-    span = {"trace_id": "trace-1", "span_id": "span-1", "status": "STATUS_CODE_ERROR", "error": "test error"}
-    write_jsonl(source, [span])
+    command_input = "run failing command " + ("x" * 450)
+    error_output = "test error: command failed " + ("y" * 450)
+    call_event = {
+        "agent_role": "main",
+        "event": "tool_call",
+        "payload": {
+            "args": {"command": command_input, "host": "native"},
+            "tool_call_id": "call-1",
+            "tool_name": "bash",
+        },
+        "session_id": "session-1",
+        "timestamp": "2026-08-14T17:49:07.379+08:00",
+    }
+    result_event = {
+        "agent_role": "main",
+        "event": "tool_result",
+        "payload": {
+            "content": [{"type": "text", "text": error_output}],
+            "details": {"ok": False, "error": {"message": error_output}},
+            "is_error": False,
+            "tool_call_id": "call-1",
+            "tool_name": "bash",
+        },
+        "session_id": "session-1",
+        "timestamp": "2026-08-14T17:49:07.934+08:00",
+    }
+    span = {
+        "trace_id": "trace-1",
+        "span_id": "span-1",
+        "status": {"code": "STATUS_CODE_ERROR", "message": "test error: command failed"},
+        "attributes": {
+            "input.value": command_input,
+            "output.value": error_output,
+            "tool.is_error": True,
+            "tool.call_id": "call-1",
+            "source.tool_call.context": json.dumps(
+                {key: value for key, value in call_event.items() if key != "payload"},
+                ensure_ascii=False,
+            ),
+            "source.tool_result.context": json.dumps(
+                {key: value for key, value in result_event.items() if key != "payload"},
+                ensure_ascii=False,
+            ),
+        },
+    }
+    write_jsonl(source, [call_event, result_event])
     write_jsonl(prepared, [span])
     write_json(manifest, {
         "schema_version": 3,
@@ -244,10 +295,62 @@ def test_agent_cli() -> None:
         }],
         "errors": [],
     })
+    complete_report = valid_report()
+    call_line = json.dumps(call_event, ensure_ascii=False)
+    result_line = json.dumps(result_event, ensure_ascii=False)
+    source_excerpt = call_line + "\n" + result_line
+    complete_report["diagnosis"]["error_findings"][0]["evidence"][0]["raw_log_excerpt"] = source_excerpt
+    write_json(report, complete_report)
     completed = agent("validate-report", report, "--manifest", manifest)
     check(completed.returncode == 0 and json.loads(completed.stdout)["validation"] == "complete", "manifest-aware validation")
 
-    invalid = valid_report()
+    mapped = agent(
+        "source-evidence",
+        "--manifest", manifest,
+        "--trace-id", "trace-1",
+        "--span-id", "span-1",
+    )
+    mapped_value = json.loads(mapped.stdout)
+    check(
+        mapped.returncode == 0
+        and mapped_value["span_index"] == 0
+        and mapped_value["source_line_numbers"] == [1, 2]
+        and mapped_value["raw_log_excerpt"] == source_excerpt,
+        "source-evidence returns pre-conversion events and span index",
+    )
+
+    output_only = copy.deepcopy(complete_report)
+    output_only["diagnosis"]["error_findings"][0]["evidence"][0]["raw_log_excerpt"] = result_line
+    write_json(report, output_only)
+    completed = agent("validate-report", report, "--manifest", manifest)
+    check(completed.returncode == 0, "verbatim error output satisfies outcome requirement")
+
+    input_only = copy.deepcopy(complete_report)
+    input_only["diagnosis"]["error_findings"][0]["evidence"][0]["raw_log_excerpt"] = call_line
+    write_json(report, input_only)
+    rejected = agent("validate-report", report, "--manifest", manifest)
+    check(
+        rejected.returncode == 2
+        and "must include verbatim execution status or error output" in rejected.stdout,
+        "input-only TRACE excerpt rejected even when long enough",
+    )
+
+    wrong_index = copy.deepcopy(complete_report)
+    wrong_index["diagnosis"]["error_findings"][0]["evidence"][0]["span_index"] = 1
+    write_json(report, wrong_index)
+    rejected = agent("validate-report", report, "--manifest", manifest)
+    check(
+        rejected.returncode == 2 and "span_index does not match" in rejected.stdout,
+        "incorrect trace-local span index is rejected",
+    )
+
+    too_short = copy.deepcopy(complete_report)
+    too_short["diagnosis"]["error_findings"][0]["evidence"][0]["raw_log_excerpt"] = "test error"
+    write_json(report, too_short)
+    rejected = agent("validate-report", report, "--manifest", manifest)
+    check(rejected.returncode == 2 and "too short to show context" in rejected.stdout, "short excerpt rejected when span has more context")
+
+    invalid = copy.deepcopy(complete_report)
     invalid["diagnosis"]["error_findings"][0]["evidence"][0]["raw_log_excerpt"] = "fabricated"
     write_json(report, invalid)
     rejected = agent("validate-report", report, "--manifest", manifest)

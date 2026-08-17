@@ -28,6 +28,7 @@ def read_jsonl(path: Path, skip_bad_lines: bool) -> tuple[list[Json], int]:
                 row = json.loads(line)
                 if not isinstance(row, dict):
                     raise TypeError("expected JSON object")
+                row["_halo_source_line"] = line_no
                 rows.append(row)
             except Exception as exc:  # noqa: BLE001
                 if not skip_bad_lines:

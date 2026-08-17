@@ -85,9 +85,33 @@ trace_id, span_id, span_index, span_name, kind, status_code, parent_span_id,
 raw_jsonl_bytes, match_text, matched_context, match_start_char, match_end_char
 ```
 
-`matched_context` = the match plus up to `context_buffer_chars` (default 500)
+`matched_context` = the match plus up to `context_buffer_chars` (default 100)
 on each side. `has_more=true` means `match_count > returned_match_count` —
 refine the regex rather than blindly raising `max_matches`.
+
+## Report evidence windows
+
+- Build the shortest complete chain for each finding, normally 1-3 evidence
+  items and never more than 5. Order them as trigger, failure, then recovery or
+  impact when these require separate spans; omit repeated evidence.
+- For TRACE evidence, copy one contiguous verbatim window from one referenced
+  span's mapped pre-conversion source JSONL events into `raw_log_excerpt`, and
+  copy the zero-based trace-local `span_index` returned by `source-evidence`.
+  Every TRACE item in an error finding must contain
+  verbatim execution status or error output; an input/command-only excerpt is
+  invalid. Include the triggering input/command, decisive output, failure
+  status/exception, and immediate recovery/impact when present.
+  Prefer the complete relevant payload when it fits; target 5-20 readable lines
+  or 400-3,000 characters.
+- When mapped source events have at least 400 characters of source context, the
+  complete validator rejects shorter excerpts. For oversized single-line JSON,
+  call `source-evidence --pattern` with the decisive error regex and copy its
+  returned contiguous source window.
+- Keep `raw_log_excerpt` at or below 5,000 characters. A short source span may
+  remain short; never pad it or combine non-contiguous fragments.
+- `view_spans` exposes up to 16,384 characters per attribute, which is sufficient
+  for the report limit. Use `search_span` to isolate a decisive region when the
+  relevant material lies beyond that head window.
 
 ## `has_errors` semantics
 

@@ -6,7 +6,10 @@ import json
 import re
 from typing import Any, Iterable
 
-REPORT_SCHEMA_VERSION = 7
+REPORT_SCHEMA_VERSION = 9
+RAW_LOG_EXCERPT_MAX_CHARS = 5_000
+RAW_LOG_EXCERPT_CONTEXT_FLOOR_CHARS = 400
+EVIDENCE_MAX_ITEMS = 5
 REQUIRED_TOP_LEVEL_FIELDS = (
     "schema_version",
     "report_summary",
@@ -50,10 +53,10 @@ ERROR_FIELDS = (
 EVIDENCE_FIELDS = (
     "source",
     "reference",
+    "span_index",
     "tool",
     "fact",
     "raw_log_excerpt",
-    "error",
 )
 PROPOSED_CHANGE_FIELDS = (
     "priority",
@@ -67,7 +70,7 @@ PROPOSED_CHANGE_FIELDS = (
     "expected_impact",
 )
 REPORT_STRUCTURE_GUIDANCE = (
-    "Use exactly the shown v7 fields and nesting; do not add ad-hoc fields. Group each "
+    "Use exactly the shown v9 fields and nesting; do not add ad-hoc fields. Group each "
     "distinct material problem into one diagnosis.error_findings item. Do not repeat the same "
     "spans in a generic tool-failure finding and a second semantic finding; split findings "
     "by root cause. Summarize the dominant root cause briefly in primary_failure_mode. "
@@ -81,12 +84,24 @@ REPORT_STRUCTURE_GUIDANCE = (
     "A proposed change may combine errors only when one implementation at one layer "
     "genuinely resolves all of them; otherwise split it. Evidence "
     "has no id or priority: use source plus reference to identify TRACE spans, TASK/JUDGE "
-    "items, or source/output files. For TRACE evidence, copy a verbatim key log excerpt "
-    "with enough contiguous context to show the operation, relevant input/result, and "
-    "failure (prefer the triggering call plus decisive output/status/exception, typically "
-    "3-20 relevant lines when available) into raw_log_excerpt. report_summary.trace_ids is the "
+    "items, or source/output files. Build the shortest complete evidence chain that explains "
+    "cause and effect, normally 1-3 evidence items and never more than 5, ordered as triggering "
+    "input/operation, decisive failure, then recovery or impact when those are separate spans. "
+    "For TRACE evidence, copy one contiguous verbatim window from the pre-conversion source JSONL "
+    "events mapped to the referenced span into raw_log_excerpt, and copy that span's zero-based "
+    "trace-local index into span_index. Every TRACE item in an error finding must contain verbatim execution status "
+    "or error output; an input/command-only excerpt is invalid. Include the triggering command/input, "
+    "decisive output, failure status or exception, and immediate recovery/impact when they coexist "
+    "in that span. Prefer the complete "
+    "relevant input/output/status payload when it fits; use at least 400 characters whenever the "
+    "referenced span contains that much source context, and include all available context when it "
+    "is shorter. Target 5-20 readable lines or 400-3,000 characters, with a hard maximum of 5,000. "
+    "Never pad, join "
+    "non-contiguous fragments, paraphrase, repeat the same excerpt, or include unrelated noise. "
+    "report_summary.trace_ids is the "
     "report-level TRACE anchor; an individual error may instead be proved entirely by TASK, "
-    "JUDGE, SOURCE_FILE, or OUTPUT_FILE evidence. Use an empty raw_log_excerpt for non-TRACE evidence. "
+    "JUDGE, SOURCE_FILE, or OUTPUT_FILE evidence. Use null span_index and an empty "
+    "raw_log_excerpt for non-TRACE evidence. "
     "Preserve raw error text; write error titles, summaries, "
     "facts, root causes, impacts, change titles/problems/implementations/acceptance criteria/"
     "impacts in Simplified Chinese. Keep JSON keys, enums, priorities, task/trace/span ids, "
@@ -108,7 +123,7 @@ def build_report(
     proposed_changes: list[dict[str, Any]] | None = None,
     **diagnosis: Any,
 ) -> dict[str, Any]:
-    """Build a report with canonical v7 nesting."""
+    """Build a report with canonical v9 nesting."""
     diagnosis = dict(diagnosis)
     diagnosis.setdefault("error_findings", [])
     return {
@@ -155,10 +170,10 @@ def render_report_example(
                     {
                         "source": "TRACE",
                         "reference": "...",
+                        "span_index": 3,
                         "tool": "bash",
                         "fact": "工具调用返回失败状态。",
-                        "raw_log_excerpt": "status=STATUS_CODE_ERROR\nModuleNotFoundError: No module named 'pandas'",
-                        "error": "raw error",
+                        "raw_log_excerpt": "tool=bash\ncommand=python build_report.py\ninput=config.json\nstatus=STATUS_CODE_ERROR\nexit_code=1\nstderr:\nModuleNotFoundError: No module named 'pandas'\nresult=report was not created",
                     }
                 ],
                 "root_cause": "工具参数或环境与运行时不兼容。",
@@ -250,6 +265,11 @@ def _require_positive_int(value: Any, path: str) -> None:
         raise ValueError(f"model diagnostic report {path} must be an integer >= 1")
 
 
+def _require_nonnegative_int(value: Any, path: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"model diagnostic report {path} must be an integer >= 0")
+
+
 def _require_priority(value: Any, path: str) -> None:
     if value not in PRIORITIES:
         raise ValueError(
@@ -287,6 +307,12 @@ def _validate_evidence(value: Any, error_index: int, evidence_index: int) -> Non
             + ", ".join(EVIDENCE_SOURCES)
         )
     _require_string(item["reference"], f"{path}.reference", allow_empty=False)
+    if item["source"] == "TRACE":
+        _require_nonnegative_int(item["span_index"], f"{path}.span_index")
+    elif item["span_index"] is not None:
+        raise ValueError(
+            f"model diagnostic report {path}.span_index must be null for non-TRACE evidence"
+        )
     _require_string(item["tool"], f"{path}.tool")
     _require_chinese_text(item["fact"], f"{path}.fact")
     _require_string(item["raw_log_excerpt"], f"{path}.raw_log_excerpt")
@@ -298,7 +324,11 @@ def _validate_evidence(value: Any, error_index: int, evidence_index: int) -> Non
         raise ValueError(
             f"model diagnostic report {path}.raw_log_excerpt must be empty for non-TRACE evidence"
         )
-    _require_string(item["error"], f"{path}.error")
+    if len(item["raw_log_excerpt"]) > RAW_LOG_EXCERPT_MAX_CHARS:
+        raise ValueError(
+            f"model diagnostic report {path}.raw_log_excerpt must be at most "
+            f"{RAW_LOG_EXCERPT_MAX_CHARS} characters"
+        )
 
 
 def _validate_error_findings(value: Any) -> set[str]:
@@ -335,6 +365,11 @@ def _validate_error_findings(value: Any) -> set[str]:
             )
         if not isinstance(diagnostic_error["evidence"], list) or not diagnostic_error["evidence"]:
             raise ValueError(f"model diagnostic report {path}.evidence must be a non-empty array")
+        if len(diagnostic_error["evidence"]) > EVIDENCE_MAX_ITEMS:
+            raise ValueError(
+                f"model diagnostic report {path}.evidence must contain at most "
+                f"{EVIDENCE_MAX_ITEMS} items"
+            )
         for evidence_index, evidence in enumerate(diagnostic_error["evidence"]):
             _validate_evidence(evidence, index, evidence_index)
     return error_ids
