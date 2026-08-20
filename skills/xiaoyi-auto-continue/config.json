@@ -1,9 +1,0 @@
-{
-    "test_file_base": "D:/filework/test_file",
-    "xlsx_file": "D:/filework/xiaoyi_batch_runner/文件整理_责任边界_B100.xlsx",
-    "prompts_dir": "D:/filework/xiaoyi_batch_runner/prompts",
-    "output_base": "D:/filework/xiaoyi_batch_runner/test_runs",
-    "xiaoyi_timeout": 1800,
-    "retry_count": 3,
-    "xiaoyi_script": "D:/filework/xiaoyi_batch_runner/xiaoyi_batch_runner.py"
-}

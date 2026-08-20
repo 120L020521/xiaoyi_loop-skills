@@ -1,6 +1,0 @@
-interface:
-  display_name: "Run XiaoYi"
-  short_description: "统一路由小艺 Runner、Judge 与 HALO 诊断"
-  default_prompt: "Use $run-xiaoyi to route this XiaoYi request and stop after the last stage explicitly requested by the user."
-policy:
-  allow_implicit_invocation: true

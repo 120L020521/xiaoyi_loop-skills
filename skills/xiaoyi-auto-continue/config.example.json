@@ -1,8 +1,0 @@
-{
-    "test_file_base": "<resolve from user path or cwd>/test_file",
-    "xlsx_file": "",
-    "prompts_dir": "<resolve from user path or cwd>/prompts",
-    "output_base": "<resolve from user path or cwd>/test_runs",
-    "xiaoyi_timeout": 1800,
-    "retry_count": 3
-}

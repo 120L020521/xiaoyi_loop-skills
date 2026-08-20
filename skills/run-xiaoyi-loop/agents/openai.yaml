@@ -1,6 +1,0 @@
-interface:
-  display_name: "Run XiaoYi Loop"
-  short_description: "批量运行数字 Task；仅在明确要求时 Judge"
-  default_prompt: "Use $run-xiaoyi-loop to run task117 and task120, stopping after Runner unless I explicitly request Judge."
-policy:
-  allow_implicit_invocation: false
