@@ -1,0 +1,19 @@
+{
+  "metadata_root": "external:task",
+  "deliverables_root": "external:deliverables_final",
+  "scripts_root": "../scripts/runtime",
+  "mock_runner_script": "external:note/data_yangshi/jiaoben/run_data_mock.py",
+  "output_root": "external:xiaoyi_logs",
+  "month": "2026-07",
+  "calendar_start": "2026-07-01",
+  "calendar_end": "2026-07-31",
+  "xiaoyi_timeout": 1800,
+  "helper_timeout": 300,
+  "poll_seconds": 3,
+  "task_interval": 3,
+  "person_interval": 5,
+  "artifact_wait_timeout_seconds": 45,
+  "artifact_poll_seconds": 2,
+  "artifact_stable_checks": 2,
+  "prompt_suffix": ""
+}
