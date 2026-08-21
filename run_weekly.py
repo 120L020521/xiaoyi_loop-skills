@@ -7,6 +7,9 @@ under ``standalone_weekly/`` and does not depend on the installed Skills tree.
 
 from __future__ import annotations
 
+import os
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 import argparse
 import importlib.util
 import json
@@ -21,8 +24,8 @@ STANDALONE_ROOT = SCRIPT_ROOT / "standalone_weekly"
 LAUNCHER_PATH = STANDALONE_ROOT / "scripts" / "run_weekly.py"
 
 TARGETS: dict[str, tuple[str, int]] = {
-    "z1": ("周泽宇", 1),
-    "z2": ("周泽宇", 2),
+    "z1": ("zhouzeyu", 3),
+    "z2": ("zhouzeyu", 2),
     "s1": ("苏晚", 1),
     "s2": ("苏晚", 2),
     "t1": ("唐可", 1),
@@ -33,7 +36,7 @@ TARGETS: dict[str, tuple[str, int]] = {
     "f2": ("方一诺", 2),
 }
 
-WEEK_LABELS = {1: "第一周", 2: "第二周"}
+WEEK_LABELS = {1: "第一周", 2: "第二周",3:"firstweek"}
 
 
 def _load_launcher() -> ModuleType:
