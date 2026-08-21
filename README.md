@@ -77,6 +77,26 @@ DEFAULT_PATH = r'<你的路径>\note\data_yangshi\new\周泽宇\第一周'
 
 `run_data_mock.py` 已使用 `Path(__file__).resolve().parent` 计算路径，无需修改。
 
+### note 数据目录名一致性
+
+`note/data_yangshi/new/` 下的目录名需要与 `run_data_mock.py` 中的 TARGETS 映射一致。当前各人员目录命名如下：
+
+| 人员 | 目录名 | 周次 |
+|------|--------|------|
+| 周泽宇 | `zhouzeyu` | `firstweek`、`第二周` |
+| 苏晚 | `苏晚` | `第一周`、`第二周` |
+| 唐可 | `唐可` | `第一周`、`第二周` |
+| 陈景明 | `陈景明` | `第一周`、`第二周` |
+| 方一诺 | `方一诺` | `第一周`、`第二周` |
+
+如果你的目录名与上表不一致（比如改为了全中文或全英文），需要同步修改 `run_data_mock.py` 中 TARGETS 的人员名和周次名称，确保路径能拼接成功。例如：
+
+```python
+# 如果目录改为 zhouzeyu/firstweek 和 zhouzeyu/secondweek
+"z1": ("zhouzeyu", "firstweek"),
+"z2": ("zhouzeyu", "secondweek"),
+```
+
 ## 快速开始
 
 ```bash
