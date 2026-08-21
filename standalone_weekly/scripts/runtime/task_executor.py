@@ -42,12 +42,18 @@ def start_prompt(
     target: str | None,
     verbose: bool = False,
 ) -> None:
-    """启动小艺任务"""
+    """启动小艺任务
+
+    先通过 load_skill 工具调用 xiaoyizhoubao skill，再附上原来的命令文本，
+    让小艺在 skill 上下文中执行周报任务。
+    """
+    skill_prefix = "使用load_skill工具，调用xiaoyizhoubao这个skill，"
+    query_text = f"{skill_prefix}{prompt_text}"
     command = (
         f"aa start -b {VASSISTANT_BUNDLE} "
         f"-a {VASSISTANT_ABILITY} "
         f"--ps launch_type pc_agent_task_start "
-        f"--ps query {shell_quote(prompt_text)}"
+        f"--ps query {shell_quote(query_text)}"
     )
     out = remote_shell(command, target=target, timeout=SHELL_TIMEOUT, verbose=verbose)
     if out.strip():
