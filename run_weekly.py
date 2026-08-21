@@ -139,8 +139,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="直接指定 run_data_mock.py；优先级高于 --note-root",
     )
     parser.add_argument(
-        "--agent-workspace",
-        help="批次产物输出根目录；默认使用执行命令时的当前目录",
+        "--output-root",
+        help="批次产物输出根目录；不再自动分配版本子目录，输出直接落在此目录",
     )
     parser.add_argument("--config", help="自定义周报 Runner JSON 配置")
     parser.add_argument("--device", help="HDC 目标设备 ID")
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         "--mock-runner-script",
         str(mock_runner_script),
     ]
-    for name in ("agent_workspace", "config", "device", "date"):
+    for name in ("output_root", "config", "device", "date"):
         value = getattr(args, name)
         if value:
             forwarded.extend([f"--{name.replace('_', '-')}", value])

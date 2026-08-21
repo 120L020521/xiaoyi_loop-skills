@@ -77,8 +77,8 @@ DEFAULTS: dict[str, Any] = {
 }
 
 _XIAOYI_WORKSPACE_ROOT = "/storage/media/100/local/files/Docs/.xiaoyi/workspace"
-_WEEKLY_WORKLOG_RELATIVE_ROOT = "memory/weekly-report-skill/worklog"
-_WEEKLY_SUMMARY_RELATIVE_ROOT = "memory/weekly-report-skill/summary"
+_WEEKLY_WORKLOG_RELATIVE_ROOT = "memory/weekly-work-report/worklog"
+_WEEKLY_SUMMARY_RELATIVE_ROOT = "memory/weekly-work-report/summary"
 _MOCK_PERSON_PREFIXES = {
     "周泽宇": "z",
     "苏晚": "s",
